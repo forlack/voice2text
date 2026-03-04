@@ -830,6 +830,8 @@ class Voice2TextApp(App):
 
     @work(thread=True)
     def _download_model(self, info: ModelInfo) -> None:
+        import traceback
+
         progress_widget = self.query_one("#download-progress", DownloadProgress)
 
         def on_progress(fraction: float, text: str) -> None:
@@ -838,6 +840,13 @@ class Voice2TextApp(App):
 
         try:
             self.model_manager.download_model(info, progress_cb=on_progress)
+        except Exception as e:
+            self.call_from_thread(progress_widget.hide_progress)
+            self.log.error(f"Download failed:\n{traceback.format_exc()}")
+            self.call_from_thread(self._update_status, f"Download failed: {e}")
+            return
+
+        try:
             self.call_from_thread(progress_widget.hide_progress)
             self.call_from_thread(self._update_status, f"Loading {info.name}...")
             self.call_from_thread(self.push_screen, LoadingScreen(info.name))
@@ -845,13 +854,12 @@ class Voice2TextApp(App):
             self.call_from_thread(self.pop_screen)
             self.call_from_thread(self._on_model_loaded)
         except Exception as e:
-            self.call_from_thread(progress_widget.hide_progress)
-            # Dismiss loading modal if it was shown
             try:
                 self.call_from_thread(self.pop_screen)
             except Exception:
                 pass
-            self.call_from_thread(self._update_status, f"Download failed: {e}")
+            self.log.error(f"Model load failed:\n{traceback.format_exc()}")
+            self.call_from_thread(self._update_status, f"Load failed: {e}")
 
     @work(thread=True)
     def _load_model_async(self, info: ModelInfo) -> None:

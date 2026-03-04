@@ -246,21 +246,12 @@ class ModelManager:
             providers, _ = _detect_providers()
         model_dir = MODELS_DIR / info.name
 
-        # Suppress onnxruntime C++ stderr noise during model load
-        devnull = os.open(os.devnull, os.O_WRONLY)
-        old_stderr = os.dup(2)
-        os.dup2(devnull, 2)
-        try:
-            self._asr_model = onnx_asr.load_model(
-                info.onnx_asr_name,
-                path=str(model_dir),
-                quantization="int8",
-                providers=providers,
-            )
-        finally:
-            os.dup2(old_stderr, 2)
-            os.close(old_stderr)
-            os.close(devnull)
+        self._asr_model = onnx_asr.load_model(
+            info.onnx_asr_name,
+            path=str(model_dir),
+            quantization="int8",
+            providers=providers,
+        )
         self._active = info
 
     def unload(self) -> None:
