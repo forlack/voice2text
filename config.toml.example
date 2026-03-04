@@ -1,0 +1,27 @@
+# Voice2Text Configuration
+# Copy this file to config.toml to add custom models.
+#
+# Each [[models]] entry adds a model to the picker.
+# Required fields: name, onnx_asr_name
+# Optional fields: description, size_hint, repo_id, language
+#
+# Find compatible models at:
+#   https://huggingface.co/istupakov
+#   https://github.com/istupakov/onnx-asr
+
+# Example: Add Whisper Base (99+ languages, ~107 MB)
+# [[models]]
+# name = "whisper-base"
+# onnx_asr_name = "whisper-base"
+# description = "99+ Languages – OpenAI Whisper Base"
+# size_hint = "~107 MB"
+# repo_id = "istupakov/whisper-base-onnx"
+
+# Example: Add Canary 1B v2 (25 languages + translation, ~1 GB)
+# [[models]]
+# name = "canary-1b-v2"
+# onnx_asr_name = "nemo-canary-1b-v2"
+# description = "25 Languages + Translation – Canary 1B v2"
+# size_hint = "~1 GB"
+# repo_id = "istupakov/canary-1b-v2-onnx"
+# language = "en"

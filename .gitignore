@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+models/
+transcripts/
+config.toml
+.pytest_cache/
