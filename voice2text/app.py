@@ -887,6 +887,14 @@ class Voice2TextApp(App):
 def main() -> None:
     import argparse
 
+    # Pre-initialize tqdm's multiprocessing lock while fds are still valid.
+    # tqdm creates a multiprocessing.RLock in __new__ which spawns the
+    # resource tracker subprocess.  Inside Textual's worker threads the fd
+    # table is redirected, so Python 3.14's fork_exec rejects the fds.
+    # Doing it here (before app.run) ensures fds are in a good state.
+    import tqdm.std
+    tqdm.std.TqdmDefaultWriteLock()
+
     parser = argparse.ArgumentParser(description="Voice2Text TUI")
     parser.add_argument("--cpu", action="store_true", help="Force CPU inference (skip CUDA)")
     args = parser.parse_args()
