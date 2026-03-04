@@ -838,12 +838,15 @@ class Voice2TextApp(App):
             self.call_from_thread(progress_widget.show_progress, fraction, text)
             self.call_from_thread(self._update_status, text)
 
+        log_path = Path(__file__).resolve().parent.parent / "error.log"
+
         try:
             self.model_manager.download_model(info, progress_cb=on_progress)
         except Exception as e:
             self.call_from_thread(progress_widget.hide_progress)
-            self.log.error(f"Download failed:\n{traceback.format_exc()}")
-            self.call_from_thread(self._update_status, f"Download failed: {e}")
+            tb = traceback.format_exc()
+            log_path.write_text(f"DOWNLOAD FAILED: {info.name}\n\n{tb}")
+            self.call_from_thread(self._update_status, f"Download failed: {e} (see error.log)")
             return
 
         try:
@@ -858,8 +861,9 @@ class Voice2TextApp(App):
                 self.call_from_thread(self.pop_screen)
             except Exception:
                 pass
-            self.log.error(f"Model load failed:\n{traceback.format_exc()}")
-            self.call_from_thread(self._update_status, f"Load failed: {e}")
+            tb = traceback.format_exc()
+            log_path.write_text(f"LOAD FAILED: {info.name}\n\n{tb}")
+            self.call_from_thread(self._update_status, f"Load failed: {e} (see error.log)")
 
     @work(thread=True)
     def _load_model_async(self, info: ModelInfo) -> None:
