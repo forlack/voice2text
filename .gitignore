@@ -6,3 +6,4 @@ models/
 transcripts/
 config.toml
 .pytest_cache/
+PRD.md
