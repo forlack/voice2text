@@ -2,6 +2,8 @@
 
 A terminal-based voice-to-text application with real-time transcription. Built with [Textual](https://textual.textualize.io/) and [onnx-asr](https://github.com/istupakov/onnx-asr).
 
+![Voice2Text Screenshot](screenshot.png)
+
 ## Features
 
 - **Record & Transcribe** — Press SPACE to record from your microphone, SPACE again to stop and transcribe
