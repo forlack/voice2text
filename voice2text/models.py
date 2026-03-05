@@ -9,10 +9,24 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-import onnxruntime as ort
+import sys
 
-# Suppress onnxruntime CUDA warnings (e.g. missing cuBLAS/cuDNN) from stderr
-ort.set_default_logger_severity(3)  # 3 = ERROR only, suppresses WARNINGS
+# Suppress onnxruntime CUDA warnings (e.g. missing cuBLAS/cuDNN) from stderr.
+# ORT writes errors to C-level stderr (fd 2) during import and provider probes,
+# bypassing Python logging entirely. We silence fd 2 during these calls.
+_stderr_fd = sys.stderr.fileno()
+_saved_fd = os.dup(_stderr_fd)
+_devnull = os.open(os.devnull, os.O_WRONLY)
+os.dup2(_devnull, _stderr_fd)
+os.close(_devnull)
+try:
+    import onnxruntime as ort
+finally:
+    os.dup2(_saved_fd, _stderr_fd)
+    os.close(_saved_fd)
+del _stderr_fd, _saved_fd, _devnull
+
+ort.set_default_logger_severity(3)
 
 MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
 _LAST_MODEL_FILE = MODELS_DIR / ".last_model"
@@ -140,13 +154,34 @@ def _mark_downloaded(info: ModelInfo) -> None:
     (d / ".downloaded").touch()
 
 
+def _suppress_stderr(func):
+    """Call func with C-level stderr (fd 2) silenced.
+
+    ORT writes errors directly to fd 2, bypassing Python's sys.stderr.
+    Textual redirects sys.stderr so fileno() won't return 2 — we must
+    hardcode fd 2 to actually suppress the native output.
+    """
+    try:
+        saved_fd = os.dup(2)
+    except OSError:
+        return func()
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(devnull, 2)
+    os.close(devnull)
+    try:
+        return func()
+    finally:
+        os.dup2(saved_fd, 2)
+        os.close(saved_fd)
+
+
 def _detect_providers() -> tuple[list[str], str]:
     """Detect available ONNX Runtime providers. Returns (providers, label).
 
     Lists CUDA first if available, but onnxruntime will silently fall back
     to CPU if CUDA runtime libs (cuBLAS, cuDNN) aren't installed.
     """
-    available = ort.get_available_providers()
+    available = _suppress_stderr(ort.get_available_providers)
     if "CUDAExecutionProvider" in available:
         return ["CUDAExecutionProvider", "CPUExecutionProvider"], "CUDA"
     return ["CPUExecutionProvider"], "CPU"
@@ -251,11 +286,13 @@ class ModelManager:
             providers, _ = _detect_providers()
         model_dir = MODELS_DIR / info.name
 
-        self._asr_model = onnx_asr.load_model(
-            info.onnx_asr_name,
-            path=str(model_dir),
-            quantization="int8",
-            providers=providers,
+        self._asr_model = _suppress_stderr(
+            lambda: onnx_asr.load_model(
+                info.onnx_asr_name,
+                path=str(model_dir),
+                quantization="int8",
+                providers=providers,
+            )
         )
         self._active = info
 
@@ -284,4 +321,7 @@ class ModelManager:
             result = self._asr_model.recognize(tmp_path, **kwargs)
             return result
         finally:
-            os.unlink(tmp_path)
+            try:
+                os.unlink(tmp_path)
+            except PermissionError:
+                pass  # Windows: file may still be held by ONNX Runtime

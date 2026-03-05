@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from pathlib import Path
 
@@ -391,6 +392,7 @@ class Voice2TextApp(App):
 
     def __init__(self, force_cpu: bool = False) -> None:
         super().__init__()
+        self._setup_file_logging()
         self.recorder = Recorder()
         self.model_manager = ModelManager(force_cpu=force_cpu)
         self.history: list[TranscriptEntry] = []
@@ -402,6 +404,16 @@ class Voice2TextApp(App):
         self._vad = None  # VoiceActivityDetector instance during recording
         self._segment_texts: list[str] = []  # accumulated segment transcriptions
         self._segment_boundary: int = 0  # frame index of last segment end
+
+    @staticmethod
+    def _setup_file_logging() -> None:
+        log_path = Path(__file__).resolve().parent.parent / "error.log"
+        handler = logging.FileHandler(log_path)
+        handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s: %(message)s"))
+        logger = logging.getLogger("voice2text")
+        logger.addHandler(handler)
+        logger.setLevel(logging.DEBUG)
+        logger.propagate = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -724,11 +736,16 @@ class Voice2TextApp(App):
             return
 
         entry = save_transcript(full_text)
-        clip_msg = copy_to_clipboard(full_text)
         self.query_one("#transcript-area", Static).update(full_text)
         self.history.insert(0, entry)
         self._refresh_history()
-        self._update_status(f"{clip_msg} | Ready")
+        self._copy_async(full_text, "Ready")
+
+    @work(thread=True)
+    def _copy_async(self, text: str, suffix: str) -> None:
+        """Copy text to clipboard in a background thread to avoid blocking the UI."""
+        clip_msg = copy_to_clipboard(text)
+        self.call_from_thread(self._update_status, f"{clip_msg} | {suffix}")
 
     def _stop_recording(self) -> None:
         is_interactive = self._interactive and self._vad is not None
@@ -814,8 +831,7 @@ class Voice2TextApp(App):
             entry = item.entry
             text = entry.full_text()
             self.query_one("#transcript-area", Static).update(text)
-            clip_msg = copy_to_clipboard(text)
-            self._update_status(f"{clip_msg} | Loaded from history")
+            self._copy_async(text, "Loaded from history")
 
     def _show_download_confirm(self, info: ModelInfo) -> None:
         """Show a modal dialog to confirm model download."""

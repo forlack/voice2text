@@ -1,22 +1,31 @@
 """Clipboard support: system clipboard, tmux buffer, and OSC 52 fallback."""
 
 import base64
+import logging
 import os
 import shutil
 import subprocess
+import sys
+
+log = logging.getLogger(__name__)
 
 
 def _run(cmd: list[str], input_text: str) -> bool:
     """Run a command with text piped to stdin. Returns True on success."""
     try:
+        kwargs = {}
+        if sys.platform == "win32":
+            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        else:
+            kwargs["start_new_session"] = True
         subprocess.run(
             cmd,
             input=input_text.encode(),
             check=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            start_new_session=True,
             timeout=5,
+            **kwargs,
         )
         return True
     except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
@@ -24,7 +33,28 @@ def _run(cmd: list[str], input_text: str) -> bool:
 
 
 def _copy_system(text: str) -> bool:
-    """Copy to system clipboard via wl-copy, xclip, pbcopy, or kitten."""
+    """Copy to system clipboard via wl-copy, xclip, pbcopy, kitten, or Win32 API."""
+    # Windows
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            CF_UNICODETEXT = 13
+            kernel32 = ctypes.windll.kernel32
+            user32 = ctypes.windll.user32
+            user32.OpenClipboard(0)
+            user32.EmptyClipboard()
+            encoded = text.encode("utf-16le") + b"\x00\x00"
+            hmem = kernel32.GlobalAlloc(0x0042, len(encoded))
+            ptr = kernel32.GlobalLock(hmem)
+            ctypes.memmove(ptr, encoded, len(encoded))
+            kernel32.GlobalUnlock(hmem)
+            user32.SetClipboardData(CF_UNICODETEXT, hmem)
+            user32.CloseClipboard()
+            return True
+        except Exception:
+            log.exception("Win32 clipboard failed")
+            return False
     # Wayland
     if shutil.which("wl-copy"):
         return _run(["wl-copy"], text)
@@ -65,7 +95,8 @@ def _copy_osc52(text: str) -> bool:
     try:
         encoded = base64.b64encode(text.encode()).decode()
         osc = f"\033]52;c;{encoded}\a"
-        with open("/dev/tty", "wb") as tty:
+        tty_path = "CON" if sys.platform == "win32" else "/dev/tty"
+        with open(tty_path, "wb") as tty:
             tty.write(osc.encode())
             tty.flush()
         return True

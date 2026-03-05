@@ -35,6 +35,7 @@ pip install -e .
 | Ubuntu/Debian | `sudo apt install portaudio19-dev` |
 | Fedora | `sudo dnf install portaudio-devel` |
 | macOS | `brew install portaudio` |
+| Windows | `choco install portaudio` or use prebuilt PyAudio wheels |
 
 **Clipboard** (at least one recommended):
 
@@ -147,7 +148,8 @@ Any model supported by [onnx-asr](https://github.com/istupakov/onnx-asr) works. 
 | Linux Kitty | `kitten clipboard` or `wl-copy` | Works |
 | macOS + tmux | `pbcopy` + `tmux -w` | Works |
 | macOS | `pbcopy` | Works |
-| Any terminal (fallback) | OSC 52 via `/dev/tty` | Works in most modern terminals |
+| Windows | Win32 API (built-in) | Works |
+| Any terminal (fallback) | OSC 52 via `/dev/tty` or `CON` | Works in most modern terminals |
 
 ### Inference
 
