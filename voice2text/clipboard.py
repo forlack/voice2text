@@ -38,17 +38,36 @@ def _copy_system(text: str) -> bool:
     if sys.platform == "win32":
         try:
             import ctypes
+            import ctypes.wintypes as w
 
             CF_UNICODETEXT = 13
+            GMEM_MOVEABLE = 0x0002
+
             kernel32 = ctypes.windll.kernel32
             user32 = ctypes.windll.user32
-            user32.OpenClipboard(0)
-            user32.EmptyClipboard()
+
+            # Set proper argtypes/restype for 64-bit handle safety
+            kernel32.GlobalAlloc.argtypes = [w.UINT, ctypes.c_size_t]
+            kernel32.GlobalAlloc.restype = w.HGLOBAL
+            kernel32.GlobalLock.argtypes = [w.HGLOBAL]
+            kernel32.GlobalLock.restype = ctypes.c_void_p
+            kernel32.GlobalUnlock.argtypes = [w.HGLOBAL]
+            user32.OpenClipboard.argtypes = [w.HWND]
+            user32.SetClipboardData.argtypes = [w.UINT, w.HANDLE]
+
             encoded = text.encode("utf-16le") + b"\x00\x00"
-            hmem = kernel32.GlobalAlloc(0x0042, len(encoded))
+            hmem = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(encoded))
+            if not hmem:
+                return False
             ptr = kernel32.GlobalLock(hmem)
+            if not ptr:
+                return False
             ctypes.memmove(ptr, encoded, len(encoded))
             kernel32.GlobalUnlock(hmem)
+
+            if not user32.OpenClipboard(None):
+                return False
+            user32.EmptyClipboard()
             user32.SetClipboardData(CF_UNICODETEXT, hmem)
             user32.CloseClipboard()
             return True
