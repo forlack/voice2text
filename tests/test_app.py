@@ -371,12 +371,12 @@ def test_recorder_initial_state():
     assert rec.level == 0.0
 
 
-# ── Test: HF_HUB_ENABLE_HF_TRANSFER ─────────────────────────────────
+# ── Test: HF env vars for Python 3.14 compat ────────────────────────
 
 
-def test_hf_xet_disabled():
-    """hf-xet should be disabled to prevent FDS_TO_KEEP errors."""
-    # Import triggers the os.environ.setdefault
+def test_hf_xet_and_progress_bars_disabled():
+    """hf_xet and progress bars should be disabled to prevent FDS_TO_KEEP errors."""
     import voice2text.models  # noqa: F401
 
-    assert os.environ.get("HF_HUB_ENABLE_HF_TRANSFER") == "0"
+    assert os.environ.get("HF_HUB_DISABLE_XET") == "1"
+    assert os.environ.get("HF_HUB_DISABLE_PROGRESS_BARS") == "1"

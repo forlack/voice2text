@@ -71,8 +71,11 @@ def _load_custom_models() -> list[ModelInfo]:
     custom = []
     for m in config.get("models", []):
         try:
+            name = m["name"]
+            if "/" in name or "\\" in name or ".." in name:
+                continue  # reject path traversal in model names
             custom.append(ModelInfo(
-                name=m["name"],
+                name=name,
                 onnx_asr_name=m["onnx_asr_name"],
                 description=m.get("description", ""),
                 size_hint=m.get("size_hint", "unknown"),
@@ -223,7 +226,9 @@ class ModelManager:
                 progress_cb(fraction, f"Downloading {short_name} ({i+1}/{len(files)})...")
 
             cached_path = hf_hub_download(repo_id=repo_id, filename=filename)
-            dest = model_dir / filename
+            dest = (model_dir / filename).resolve()
+            if not str(dest).startswith(str(model_dir.resolve()) + os.sep):
+                raise ValueError(f"Unsafe filename in repo: {filename}")
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(cached_path, dest)
 
