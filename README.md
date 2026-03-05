@@ -6,6 +6,7 @@ A terminal-based voice-to-text application with real-time transcription. Built w
 
 ## Features
 
+- **100% Local & Offline** — All speech recognition runs on your machine. No audio leaves your computer, no cloud APIs, no accounts required. Models are open-source weights ([CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/) / [MIT](https://opensource.org/licenses/MIT)) downloaded once from HuggingFace, then used entirely offline
 - **Record & Transcribe** — Press SPACE to record from your microphone, SPACE again to stop and transcribe
 - **Interactive Mode** — Press `i` to toggle real-time chunked transcription. Uses Silero VAD to detect speech/silence boundaries and transcribes segments as you speak, showing results incrementally
 - **Multiple Models** — Ships with 3 built-in models, add more via `config.toml`
