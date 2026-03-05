@@ -163,6 +163,7 @@ Use `voice2text --cpu` to force CPU mode, useful for benchmarking or when CUDA c
 ### Tested On
 
 - CachyOS (Arch-based), Python 3.14, Kitty + tmux, Wayland/KDE Plasma
+- Windows 10/11, Python 3.12 (recommended for PyAudio wheel support)
 
 ## Project Structure
 
