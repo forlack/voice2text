@@ -383,6 +383,8 @@ class Voice2TextApp(App):
     BINDINGS = [
         Binding("space", "toggle_record", "Record", show=True),
         Binding("i", "toggle_interactive", "Interactive Mode", show=True),
+        Binding("p", "post_process", "Grammar Fix", show=True),
+        Binding("ctrl+z", "undo_correction", "Undo", show=False),
         Binding("x", "delete_selected", "Delete", show=True),
         Binding("q", "quit_app", "Quit", show=True),
     ]
@@ -404,6 +406,9 @@ class Voice2TextApp(App):
         self._vad = None  # VoiceActivityDetector instance during recording
         self._segment_texts: list[str] = []  # accumulated segment transcriptions
         self._segment_boundary: int = 0  # frame index of last segment end
+        self._grammar = None  # lazy-loaded GrammarCorrector
+        self._pre_correction_text: str | None = None  # for undo
+        self._pre_correction_entry: TranscriptEntry | None = None  # for undo
 
     @staticmethod
     def _setup_file_logging() -> None:
@@ -530,6 +535,158 @@ class Voice2TextApp(App):
         self._interactive = not self._interactive
         self._update_status("Ready")
 
+    @staticmethod
+    def _get_silence_seconds() -> float:
+        """Read silence_seconds from config.toml, default 0.7."""
+        config_file = Path(__file__).resolve().parent.parent / "config.toml"
+        if not config_file.exists():
+            return 0.5
+        try:
+            try:
+                import tomllib
+            except ModuleNotFoundError:
+                import tomli as tomllib  # type: ignore[no-redef]
+            with open(config_file, "rb") as f:
+                config = tomllib.load(f)
+            return float(config.get("interactive", {}).get("silence_seconds", 0.5))
+        except Exception:
+            return 0.5
+
+    # ── Grammar Post-Processing ────────────────────────────────────────
+
+    def _get_transcript_text(self) -> str:
+        """Get the current text from the transcript area."""
+        widget = self.query_one("#transcript-area", Static)
+        content = widget._Static__content  # noqa: WPS437
+        return str(content) if content else ""
+
+    def action_post_process(self) -> None:
+        """Run grammar correction on the current transcript text."""
+        if self.recorder.is_recording:
+            return
+        text = self._get_transcript_text()
+        if not text.strip():
+            self._update_status("Nothing to correct")
+            return
+        # Don't re-correct placeholder text
+        placeholders = ("Press SPACE", "No model", "Loading", "Recording", "Transcribing", "No speech")
+        if any(text.startswith(p) for p in placeholders):
+            self._update_status("Nothing to correct")
+            return
+
+        from .grammar import is_grammar_downloaded
+
+        if not is_grammar_downloaded():
+            self._show_grammar_download_confirm(text)
+            return
+        self._update_status("Correcting grammar...")
+        self._run_grammar(text)
+
+    def _show_grammar_download_confirm(self, pending_text: str) -> None:
+        from .grammar import get_grammar_size_hint
+
+        class GrammarDownloadInfo:
+            name = "grammar-correction"
+            description = "T5 Grammar Correction (INT8 ONNX)"
+            size_hint = get_grammar_size_hint()
+
+        def on_dismiss(result: bool) -> None:
+            if result:
+                self._download_and_correct(pending_text)
+            else:
+                self._update_status("Grammar correction cancelled")
+
+        self.push_screen(DownloadConfirmScreen(GrammarDownloadInfo()), callback=on_dismiss)
+
+    @work(thread=True)
+    def _download_and_correct(self, text: str) -> None:
+        import traceback
+        from .grammar import download_grammar_model
+
+        progress_widget = self.query_one("#download-progress", DownloadProgress)
+
+        def on_progress(fraction: float, msg: str) -> None:
+            self.call_from_thread(progress_widget.show_progress, fraction, msg)
+            self.call_from_thread(self._update_status, msg)
+
+        log_path = Path(__file__).resolve().parent.parent / "error.log"
+        try:
+            download_grammar_model(progress_cb=on_progress)
+        except Exception as e:
+            self.call_from_thread(progress_widget.hide_progress)
+            tb = traceback.format_exc()
+            log_path.write_text(f"GRAMMAR DOWNLOAD FAILED:\n\n{tb}")
+            self.call_from_thread(self._update_status, f"Download failed: {e} (see error.log)")
+            return
+
+        self.call_from_thread(progress_widget.hide_progress)
+        self.call_from_thread(self._update_status, "Correcting grammar...")
+        self._do_grammar_correction(text)
+
+    @work(thread=True)
+    def _run_grammar(self, text: str) -> None:
+        self._do_grammar_correction(text)
+
+    def _do_grammar_correction(self, text: str) -> None:
+        """Load grammar model if needed and run correction. Called from worker thread."""
+        from .grammar import GrammarCorrector
+
+        try:
+            if self._grammar is None:
+                self._grammar = GrammarCorrector()
+
+            corrected = self._grammar.correct(text)
+        except Exception as e:
+            log_path = Path(__file__).resolve().parent.parent / "error.log"
+            import traceback
+            log_path.write_text(f"GRAMMAR CORRECTION FAILED:\n\n{traceback.format_exc()}")
+            self.call_from_thread(self._update_status, f"Grammar error: {e} (see error.log)")
+            return
+
+        if corrected.strip() == text.strip():
+            self.call_from_thread(self._update_status, "No corrections needed | Ready")
+            return
+
+        def _apply():
+            # Store undo state
+            self._pre_correction_text = text
+            # Find the current history entry to allow undo
+            if self.history:
+                for entry in self.history:
+                    if entry.full_text().strip() == text.strip():
+                        self._pre_correction_entry = entry
+                        # Overwrite the file with corrected text
+                        entry.path.write_text(corrected, encoding="utf-8")
+                        entry.preview = corrected[:80].replace("\n", " ").strip()
+                        break
+            self.query_one("#transcript-area", Static).update(corrected)
+            self._refresh_history()
+
+        self.call_from_thread(_apply)
+        clip_msg = copy_to_clipboard(corrected)
+        self.call_from_thread(
+            self._update_status,
+            f"{clip_msg} | Grammar corrected | ctrl+z to undo",
+        )
+
+    def action_undo_correction(self) -> None:
+        """Undo the last grammar correction."""
+        if self._pre_correction_text is None:
+            return
+        original = self._pre_correction_text
+        self._pre_correction_text = None
+
+        # Revert history entry
+        if self._pre_correction_entry is not None:
+            entry = self._pre_correction_entry
+            entry.path.write_text(original, encoding="utf-8")
+            entry.preview = original[:80].replace("\n", " ").strip()
+            self._pre_correction_entry = None
+            self._refresh_history()
+
+        self.query_one("#transcript-area", Static).update(original)
+        self._copy_async(original, "Correction undone")
+
     def _refresh_model_list(self) -> None:
         lv = self.query_one("#model-list", ListView)
         lv.clear()
@@ -654,8 +811,8 @@ class Voice2TextApp(App):
         from .vad import SILERO_CHUNK_SAMPLES
 
         silence_chunks = 0
-        # ~1.5s of silence at 16kHz with 512-sample chunks = ~47 chunks
-        silence_threshold = int(1.5 * 16000 / SILERO_CHUNK_SAMPLES)
+        silence_seconds = self._get_silence_seconds()
+        silence_threshold = int(silence_seconds * 16000 / SILERO_CHUNK_SAMPLES)
         was_speech = False
         last_processed_frame = 0
         chunk_bytes = SILERO_CHUNK_SAMPLES * 2  # 16-bit = 2 bytes per sample

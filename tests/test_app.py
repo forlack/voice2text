@@ -380,3 +380,103 @@ def test_hf_xet_and_progress_bars_disabled():
 
     assert os.environ.get("HF_HUB_DISABLE_XET") == "1"
     assert os.environ.get("HF_HUB_DISABLE_PROGRESS_BARS") == "1"
+
+
+# ── Test: Grammar Correction Module ──────────────────────────────────
+
+
+def test_grammar_is_downloaded(tmp_path):
+    """Grammar model should not be downloaded by default."""
+    from voice2text.grammar import is_grammar_downloaded
+
+    with patch("voice2text.grammar._GRAMMAR_DIR", tmp_path):
+        assert not is_grammar_downloaded()
+        (tmp_path / ".downloaded").touch()
+        assert is_grammar_downloaded()
+
+
+def test_grammar_correction_quality():
+    """Grammar corrector should fix obvious errors."""
+    from voice2text.grammar import is_grammar_downloaded
+
+    if not is_grammar_downloaded():
+        pytest.skip("Grammar model not downloaded")
+
+    from voice2text.grammar import GrammarCorrector
+
+    gc = GrammarCorrector()
+    result = gc.correct("he dont know nothing about what happened")
+    assert "doesn't" in result or "does not" in result
+    assert "anything" in result or "nothing" not in result.lower()
+
+
+def test_grammar_passthrough():
+    """Grammar corrector should not mangle correct text."""
+    from voice2text.grammar import is_grammar_downloaded
+
+    if not is_grammar_downloaded():
+        pytest.skip("Grammar model not downloaded")
+
+    from voice2text.grammar import GrammarCorrector
+
+    gc = GrammarCorrector()
+    result = gc.correct("This is a correct sentence.")
+    assert result == "This is a correct sentence."
+
+
+@pytest.mark.asyncio
+async def test_post_process_no_text():
+    """Pressing p with placeholder text should show 'Nothing to correct'."""
+    app = Voice2TextApp()
+    async with app.run_test(size=(100, 30)) as pilot:
+        # Wait for background model loading to settle
+        await asyncio.sleep(3)
+        await pilot.pause()
+
+        # Press p — transcript says "Press SPACE..." which is a placeholder
+        await pilot.press("p")
+        await pilot.pause()
+
+        from textual.widgets import Static
+        status = app.query_one("#status-bar", Static)
+        status_text = str(status._Static__content)
+        assert "Nothing to correct" in status_text
+
+
+@pytest.mark.asyncio
+async def test_post_process_and_undo():
+    """Pressing p should correct text, ctrl+z should undo."""
+    from voice2text.grammar import is_grammar_downloaded
+
+    if not is_grammar_downloaded():
+        pytest.skip("Grammar model not downloaded")
+
+    app = Voice2TextApp()
+    async with app.run_test(size=(100, 30)) as pilot:
+        # Wait for background model loading to settle
+        await asyncio.sleep(3)
+        await pilot.pause()
+
+        # Simulate having a transcript with bad grammar
+        from textual.widgets import Static
+        transcript = app.query_one("#transcript-area", Static)
+        transcript.update("he dont know nothing about what happened")
+        await pilot.pause()
+
+        # Press p to correct
+        await pilot.press("p")
+        # Wait for the worker to complete
+        await asyncio.sleep(5)
+        await pilot.pause()
+
+        corrected = str(transcript._Static__content)
+        assert corrected != "he dont know nothing about what happened"
+        assert "doesn't" in corrected or "does not" in corrected
+
+        # Press ctrl+z to undo
+        await pilot.press("ctrl+z")
+        await pilot.pause()
+        await asyncio.sleep(1)
+
+        undone = str(transcript._Static__content)
+        assert undone == "he dont know nothing about what happened"

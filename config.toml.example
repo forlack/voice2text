@@ -25,3 +25,16 @@
 # size_hint = "~1 GB"
 # repo_id = "istupakov/canary-1b-v2-onnx"
 # language = "en"
+
+# ── Interactive Mode ──────────────────────────────────────────────────
+# How long to wait for silence before triggering a transcription segment.
+# Lower = more responsive but may split mid-sentence. Default: 0.5
+# [interactive]
+# silence_seconds = 0.5
+
+# ── Post-Processing ──────────────────────────────────────────────────
+# Grammar correction model (press 'p' after transcription).
+# Default: onnx-community/t5-base-grammar-correction-ONNX (~570 MB)
+# [post_processing]
+# model = "onnx-community/t5-base-grammar-correction-ONNX"
+# size_hint = "~570 MB"

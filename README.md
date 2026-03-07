@@ -1,6 +1,6 @@
 # Voice2Text
 
-A terminal-based voice-to-text application with real-time transcription. Built with [Textual](https://textual.textualize.io/) and [onnx-asr](https://github.com/istupakov/onnx-asr).
+A terminal-based voice-to-text application with real-time transcription and local grammar correction. Record, transcribe, and clean up text — all offline, all local. Built with [Textual](https://textual.textualize.io/), [onnx-asr](https://github.com/istupakov/onnx-asr), and [ONNX Runtime](https://onnxruntime.ai/).
 
 ![Voice2Text Screenshot](screenshot.png)
 
@@ -11,6 +11,7 @@ A terminal-based voice-to-text application with real-time transcription. Built w
 - **Interactive Mode** — Press `i` to toggle real-time chunked transcription. Uses Silero VAD to detect speech/silence boundaries and transcribes segments as you speak, showing results incrementally
 - **Multiple Models** — Ships with 3 built-in models, add more via `config.toml`
 - **Model Management** — Download, switch, and delete models from the TUI. INT8 quantized ONNX models for fast CPU inference with optional CUDA acceleration
+- **Grammar Correction** — Press `p` to post-process transcriptions with a local [T5 grammar model](https://huggingface.co/onnx-community/t5-base-grammar-correction-ONNX) (INT8 ONNX, ~570 MB). Fixes grammar, punctuation, and capitalization entirely offline. `ctrl+z` to undo
 - **Clipboard Integration** — Transcriptions are automatically copied to your clipboard
 - **Transcript History** — All transcriptions are saved to `./transcripts/` with timestamps, browsable and re-copyable from the sidebar
 
@@ -62,6 +63,8 @@ voice2text --cpu    # force CPU-only inference
 |---|---|
 | `SPACE` | Start/stop recording |
 | `i` | Toggle interactive mode (real-time chunked transcription) |
+| `p` | Grammar correction on current transcription |
+| `ctrl+z` | Undo grammar correction |
 | `x` | Delete highlighted model or history entry |
 | `q` | Quit |
 
@@ -78,11 +81,21 @@ voice2text --cpu    # force CPU-only inference
 Press `i` to enable. When recording with interactive mode on:
 
 - **Silero VAD** monitors your speech in real-time
-- When you pause speaking (~1.5s silence), the audio segment is sent for transcription
+- When you pause speaking (~0.5s silence, configurable), the audio segment is sent for transcription
 - Results appear incrementally as you speak
 - Press SPACE to stop — the final segment is transcribed, and the full text is saved and copied
 
 The Silero VAD model (~2 MB) is auto-downloaded on first use.
+
+### Grammar Correction
+
+Press `p` after a transcription to run local grammar correction using [t5-base-grammar-correction](https://huggingface.co/onnx-community/t5-base-grammar-correction-ONNX) (INT8 quantized ONNX). Runs entirely on CPU via ONNX Runtime — no cloud, no API keys.
+
+- First use prompts to download the grammar model (~570 MB)
+- Processes text sentence-by-sentence to preserve content
+- Corrected text replaces the original and is copied to clipboard
+- Press `ctrl+z` to undo and restore the original
+- Configure a different model in `config.toml` under `[post_processing]`
 
 ## Built-in Models
 
@@ -173,6 +186,7 @@ voice2text/
   models.py       — Model registry, download, load, inference via onnx-asr
   recorder.py     — PyAudio microphone recording, real-time level meter
   vad.py          — Silero VAD wrapper for interactive mode
+  grammar.py      — T5 ONNX grammar correction (post-processing)
   clipboard.py    — System clipboard + tmux buffer integration
   transcripts.py  — Save/load transcript .txt files
 config.toml       — Custom model configuration (optional)
