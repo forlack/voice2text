@@ -33,8 +33,9 @@
 # silence_seconds = 0.5
 
 # ── Post-Processing ──────────────────────────────────────────────────
-# Grammar correction model (press 'p' after transcription).
-# Default: onnx-community/t5-base-grammar-correction-ONNX (~570 MB)
+# Grammar correction via an external LLM CLI tool (press 'g' after transcription).
+# Default command: claude -p "<prompt>\n\n<text>"
+# Any CLI tool that accepts a -p flag with a prompt string works.
 # [post_processing]
-# model = "onnx-community/t5-base-grammar-correction-ONNX"
-# size_hint = "~570 MB"
+# command = "claude"
+# prompt = "Fix grammar, punctuation, and capitalization in this voice transcription. Return only the corrected text, nothing else."

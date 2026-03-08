@@ -79,9 +79,8 @@ class HistoryItem(ListItem):
 
     def __init__(self, entry: TranscriptEntry) -> None:
         self.entry = entry
-        ts = entry.timestamp.strftime("%Y-%m-%d %H:%M")
-        preview = entry.preview[:50] if entry.preview else "(empty)"
-        super().__init__(Label(f" {ts}  {preview}"))
+        preview = entry.preview[:80] if entry.preview else "(empty)"
+        super().__init__(Label(f" {preview}"))
 
 
 class DownloadProgress(Vertical):
@@ -383,7 +382,8 @@ class Voice2TextApp(App):
     BINDINGS = [
         Binding("space", "toggle_record", "Record", show=True),
         Binding("i", "toggle_interactive", "Interactive Mode", show=True),
-        Binding("p", "post_process", "Grammar Fix", show=True),
+        Binding("p", "toggle_pause", "Pause", show=True),
+        Binding("g", "post_process", "Grammar Fix", show=True),
         Binding("ctrl+z", "undo_correction", "Undo", show=False),
         Binding("x", "delete_selected", "Delete", show=True),
         Binding("q", "quit_app", "Quit", show=True),
@@ -406,7 +406,6 @@ class Voice2TextApp(App):
         self._vad = None  # VoiceActivityDetector instance during recording
         self._segment_texts: list[str] = []  # accumulated segment transcriptions
         self._segment_boundary: int = 0  # frame index of last segment end
-        self._grammar = None  # lazy-loaded GrammarCorrector
         self._pre_correction_text: str | None = None  # for undo
         self._pre_correction_entry: TranscriptEntry | None = None  # for undo
 
@@ -535,6 +534,19 @@ class Voice2TextApp(App):
         self._interactive = not self._interactive
         self._update_status("Ready")
 
+    def action_toggle_pause(self) -> None:
+        """Pause or resume recording."""
+        if not self.recorder.is_recording:
+            return
+        if self.recorder.is_paused:
+            self.recorder.resume()
+            bar = self.query_one("#level-bar", AudioLevelBar)
+            bar.recording = True
+        else:
+            self.recorder.pause()
+            bar = self.query_one("#level-bar", AudioLevelBar)
+            bar.recording = False
+
     @staticmethod
     def _get_silence_seconds() -> float:
         """Read silence_seconds from config.toml, default 0.7."""
@@ -552,7 +564,7 @@ class Voice2TextApp(App):
         except Exception:
             return 0.5
 
-    # ── Grammar Post-Processing ────────────────────────────────────────
+    # ── Post-Processing via LLM CLI ──────────────────────────────────
 
     def _get_transcript_text(self) -> str:
         """Get the current text from the transcript area."""
@@ -561,86 +573,32 @@ class Voice2TextApp(App):
         return str(content) if content else ""
 
     def action_post_process(self) -> None:
-        """Run grammar correction on the current transcript text."""
+        """Run grammar correction via external LLM CLI tool."""
         if self.recorder.is_recording:
             return
         text = self._get_transcript_text()
         if not text.strip():
             self._update_status("Nothing to correct")
             return
-        # Don't re-correct placeholder text
         placeholders = ("Press SPACE", "No model", "Loading", "Recording", "Transcribing", "No speech")
         if any(text.startswith(p) for p in placeholders):
             self._update_status("Nothing to correct")
             return
 
-        from .grammar import is_grammar_downloaded
+        from .postprocess import get_command
 
-        if not is_grammar_downloaded():
-            self._show_grammar_download_confirm(text)
-            return
-        self._update_status("Correcting grammar...")
-        self._run_grammar(text)
-
-    def _show_grammar_download_confirm(self, pending_text: str) -> None:
-        from .grammar import get_grammar_size_hint
-
-        class GrammarDownloadInfo:
-            name = "grammar-correction"
-            description = "T5 Grammar Correction (INT8 ONNX)"
-            size_hint = get_grammar_size_hint()
-
-        def on_dismiss(result: bool) -> None:
-            if result:
-                self._download_and_correct(pending_text)
-            else:
-                self._update_status("Grammar correction cancelled")
-
-        self.push_screen(DownloadConfirmScreen(GrammarDownloadInfo()), callback=on_dismiss)
+        self._update_status(f"Correcting with {get_command()}...")
+        self._run_post_process(text)
 
     @work(thread=True)
-    def _download_and_correct(self, text: str) -> None:
-        import traceback
-        from .grammar import download_grammar_model
-
-        progress_widget = self.query_one("#download-progress", DownloadProgress)
-
-        def on_progress(fraction: float, msg: str) -> None:
-            self.call_from_thread(progress_widget.show_progress, fraction, msg)
-            self.call_from_thread(self._update_status, msg)
-
-        log_path = Path(__file__).resolve().parent.parent / "error.log"
-        try:
-            download_grammar_model(progress_cb=on_progress)
-        except Exception as e:
-            self.call_from_thread(progress_widget.hide_progress)
-            tb = traceback.format_exc()
-            log_path.write_text(f"GRAMMAR DOWNLOAD FAILED:\n\n{tb}")
-            self.call_from_thread(self._update_status, f"Download failed: {e} (see error.log)")
-            return
-
-        self.call_from_thread(progress_widget.hide_progress)
-        self.call_from_thread(self._update_status, "Correcting grammar...")
-        self._do_grammar_correction(text)
-
-    @work(thread=True)
-    def _run_grammar(self, text: str) -> None:
-        self._do_grammar_correction(text)
-
-    def _do_grammar_correction(self, text: str) -> None:
-        """Load grammar model if needed and run correction. Called from worker thread."""
-        from .grammar import GrammarCorrector
+    def _run_post_process(self, text: str) -> None:
+        """Run post-processing in a background thread."""
+        from .postprocess import correct
 
         try:
-            if self._grammar is None:
-                self._grammar = GrammarCorrector()
-
-            corrected = self._grammar.correct(text)
+            corrected = correct(text)
         except Exception as e:
-            log_path = Path(__file__).resolve().parent.parent / "error.log"
-            import traceback
-            log_path.write_text(f"GRAMMAR CORRECTION FAILED:\n\n{traceback.format_exc()}")
-            self.call_from_thread(self._update_status, f"Grammar error: {e} (see error.log)")
+            self.call_from_thread(self._update_status, f"Post-process error: {e}")
             return
 
         if corrected.strip() == text.strip():
@@ -648,14 +606,11 @@ class Voice2TextApp(App):
             return
 
         def _apply():
-            # Store undo state
             self._pre_correction_text = text
-            # Find the current history entry to allow undo
             if self.history:
                 for entry in self.history:
                     if entry.full_text().strip() == text.strip():
                         self._pre_correction_entry = entry
-                        # Overwrite the file with corrected text
                         entry.path.write_text(corrected, encoding="utf-8")
                         entry.preview = corrected[:80].replace("\n", " ").strip()
                         break
@@ -666,7 +621,7 @@ class Voice2TextApp(App):
         clip_msg = copy_to_clipboard(corrected)
         self.call_from_thread(
             self._update_status,
-            f"{clip_msg} | Grammar corrected | ctrl+z to undo",
+            f"{clip_msg} | Corrected | ctrl+z to undo",
         )
 
     def action_undo_correction(self) -> None:
@@ -800,9 +755,14 @@ class Voice2TextApp(App):
             bar.level = self.recorder.level
             elapsed = time.monotonic() - self._record_start
             mins, secs = divmod(int(elapsed), 60)
-            self._update_status(
-                f"● Recording {mins:02d}:{secs:02d} | Press SPACE to stop"
-            )
+            if self.recorder.is_paused:
+                self._update_status(
+                    f"⏸ Paused {mins:02d}:{secs:02d} | P to resume, SPACE to stop"
+                )
+            else:
+                self._update_status(
+                    f"● Recording {mins:02d}:{secs:02d} | P to pause, SPACE to stop"
+                )
             await asyncio.sleep(0.05)
         bar.level = 0.0
 
@@ -818,6 +778,9 @@ class Voice2TextApp(App):
         chunk_bytes = SILERO_CHUNK_SAMPLES * 2  # 16-bit = 2 bytes per sample
 
         while self.recorder.is_recording and self._vad is not None:
+            if self.recorder.is_paused:
+                await asyncio.sleep(0.05)
+                continue
             current_frames = self.recorder.frame_count
             # Process any new frames
             while last_processed_frame < current_frames:

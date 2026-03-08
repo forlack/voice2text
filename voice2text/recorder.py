@@ -44,12 +44,17 @@ class Recorder:
         self._stream: pyaudio.Stream | None = None
         self._frames: list[bytes] = []
         self._recording = False
+        self._paused = False
         self._lock = threading.Lock()
         self._level: float = 0.0  # 0.0-1.0 normalized RMS level
 
     @property
     def is_recording(self) -> bool:
         return self._recording
+
+    @property
+    def is_paused(self) -> bool:
+        return self._paused
 
     @property
     def level(self) -> float:
@@ -111,9 +116,18 @@ class Recorder:
         )
         self._stream.start_stream()
 
+    def pause(self) -> None:
+        """Pause recording — stream stays open for level meter but frames are not saved."""
+        self._paused = True
+
+    def resume(self) -> None:
+        """Resume recording after a pause."""
+        self._paused = False
+
     def stop(self) -> bytes:
         """Stop recording and return WAV bytes."""
         self._recording = False
+        self._paused = False
         if self._stream is not None:
             self._stream.stop_stream()
             self._stream.close()
@@ -132,12 +146,14 @@ class Recorder:
         status_flags: int,
     ) -> tuple[None, int]:
         if in_data and self._recording:
-            with self._lock:
-                self._frames.append(in_data)
-            # Compute RMS level
+            # Compute RMS level even while paused (visual feedback)
             samples = np.frombuffer(in_data, dtype=np.int16).astype(np.float32)
             rms = np.sqrt(np.mean(samples**2)) / 32768.0
             self._level = min(1.0, rms * 5.0)  # amplify for visual feedback
+            # Only save frames when not paused
+            if not self._paused:
+                with self._lock:
+                    self._frames.append(in_data)
         return (None, pyaudio.paContinue)
 
     def extract_segment(self, start_frame: int, end_frame: int) -> bytes:

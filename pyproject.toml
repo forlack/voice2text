@@ -10,7 +10,6 @@ dependencies = [
     "onnxruntime>=1.17.0",
     "huggingface-hub>=0.20.0",
     "numpy",
-    "tokenizers>=0.15.0",
 ]
 
 [project.scripts]
