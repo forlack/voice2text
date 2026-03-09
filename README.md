@@ -62,20 +62,21 @@ voice2text --cpu    # force CPU-only inference
 | Key | Action |
 |---|---|
 | `SPACE` | Start/stop recording |
-| `i` | Toggle interactive mode (real-time chunked transcription) |
 | `p` | Pause/resume recording (audio is not captured while paused) |
+| `i` | Toggle interactive mode (real-time chunked transcription) |
 | `g` | Grammar correction on current transcription |
+| `x` | Delete highlighted history entry |
+| `m` | Open menu (model selection, delete model, all actions) |
 | `ctrl+z` | Undo grammar correction |
-| `x` | Delete highlighted model or history entry |
 | `q` | Quit |
 
 ### Workflow
 
 1. Launch the app. It auto-detects CUDA/CPU and loads the last-used model.
-2. Select a model from the picker on the right. If not downloaded, confirm to download.
+2. If no model is downloaded, the model picker opens automatically. Select one and confirm download.
 3. Press SPACE to record. The level bar shows mic input in real-time.
 4. Press SPACE again to stop. The audio is transcribed and copied to your clipboard.
-5. Click any history entry to re-copy it.
+5. Click any history entry to re-copy it. Press M to open the menu for more actions.
 
 ### Interactive Mode
 

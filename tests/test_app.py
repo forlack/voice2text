@@ -9,12 +9,16 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from textual.binding import Binding
+
 from voice2text.app import (
     AudioLevelBar,
     DownloadConfirmScreen,
     DownloadProgress,
     HistoryItem,
+    MenuScreen,
     ModelPickerItem,
+    ModelPickerScreen,
     Voice2TextApp,
 )
 from voice2text.models import MODEL_REGISTRY, ModelInfo, ModelManager
@@ -60,47 +64,70 @@ async def test_app_composes_all_widgets():
     async with app.run_test(size=(100, 30)) as pilot:
         await pilot.pause()
 
-        # Core layout widgets (use `is not None` since empty widgets are falsy)
+        # Core layout widgets
         assert app.query_one("#status-bar") is not None
-        assert app.query_one("#transcript-area") is not None
-        assert app.query_one("#level-bar") is not None
         assert app.query_one("#mic-label") is not None
-
-        # Right panel widgets
-        assert app.query_one("#model-picker-label") is not None
-        assert app.query_one("#model-list") is not None
+        assert app.query_one("#level-bar") is not None
+        assert app.query_one("#transcript-area") is not None
         assert app.query_one("#download-progress") is not None
         assert app.query_one("#history-label") is not None
         assert app.query_one("#history-list") is not None
 
 
 @pytest.mark.asyncio
-async def test_model_picker_shows_all_models():
-    """Model picker should list all models from the registry."""
-    app = Voice2TextApp()
-    async with app.run_test(size=(100, 30)) as pilot:
+async def test_menu_opens_and_closes():
+    """Pressing M should open menu, Escape should close it."""
+    from textual.app import App, ComposeResult
+    from textual.widgets import Static
+
+    class TestApp(App):
+        BINDINGS = [Binding("m", "open_menu", "Menu")]
+
+        def compose(self) -> ComposeResult:
+            yield Static("test")
+
+        def action_open_menu(self) -> None:
+            self.push_screen(MenuScreen(), callback=lambda _: None)
+
+    app = TestApp()
+    async with app.run_test(size=(80, 24)) as pilot:
         await pilot.pause()
 
-        items = list(app.query(ModelPickerItem))
+        await pilot.press("m")
+        await pilot.pause()
+        assert isinstance(app.screen, MenuScreen)
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, MenuScreen)
+
+
+@pytest.mark.asyncio
+async def test_model_picker_modal_shows_all_models():
+    """Model picker modal should list all models from the registry."""
+    from textual.app import App, ComposeResult
+    from textual.widgets import Static
+
+    class TestApp(App):
+        def compose(self) -> ComposeResult:
+            yield Static("test")
+
+        def on_mount(self):
+            self.push_screen(ModelPickerScreen())
+
+    app = TestApp()
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        await asyncio.sleep(0.2)
+
+        items = list(app.screen.query(ModelPickerItem))
         assert len(items) == len(MODEL_REGISTRY)
         model_names = {item.info.name for item in items}
         expected_names = {info.name for info in MODEL_REGISTRY}
         assert model_names == expected_names
 
-
-@pytest.mark.asyncio
-async def test_model_picker_items_persist_after_load():
-    """Model picker should keep all items after background model load."""
-    app = Voice2TextApp()
-    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.press("escape")
         await pilot.pause()
-        # Wait for any background model loading to complete
-        await asyncio.sleep(2)
-
-        items = list(app.query(ModelPickerItem))
-        assert len(items) == len(MODEL_REGISTRY), (
-            f"Expected {len(MODEL_REGISTRY)} items, got {len(items)}"
-        )
 
 
 @pytest.mark.asyncio

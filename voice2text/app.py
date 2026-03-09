@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 import time
 from pathlib import Path
 
@@ -79,8 +80,8 @@ class HistoryItem(ListItem):
 
     def __init__(self, entry: TranscriptEntry) -> None:
         self.entry = entry
-        preview = entry.preview[:80] if entry.preview else "(empty)"
-        super().__init__(Label(f" {preview}"))
+        preview = entry.preview[:70] if entry.preview else "(empty)"
+        super().__init__(Label(f" - {preview}"))
 
 
 class DownloadProgress(Vertical):
@@ -97,6 +98,14 @@ class DownloadProgress(Vertical):
 
     def hide_progress(self) -> None:
         self.display = False
+
+
+class MenuItem(ListItem):
+    """A menu action entry."""
+
+    def __init__(self, key: str, label: str, action: str) -> None:
+        self.action_name = action
+        super().__init__(Label(f" [{key}]  {label}"))
 
 
 # ── Download Confirmation Modal ─────────────────────────────────────────
@@ -289,6 +298,320 @@ class LoadingScreen(ModalScreen):
             )
 
 
+# ── Settings Modals ───────────────────────────────────────────────────
+
+
+GRAMMAR_COMMANDS = ["claude", "gemini", "codex"]
+
+
+class CommandPickerScreen(ModalScreen[str | None]):
+    """Modal for selecting the grammar correction CLI tool."""
+
+    CSS = """
+    CommandPickerScreen {
+        align: center middle;
+    }
+
+    #cmd-dialog {
+        width: 45;
+        height: auto;
+        border: thick $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #cmd-title {
+        text-style: bold;
+        width: 100%;
+        content-align: center middle;
+        margin-bottom: 1;
+    }
+
+    #cmd-list {
+        height: auto;
+        max-height: 10;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel", show=False),
+    ]
+
+    def __init__(self, current: str = "claude") -> None:
+        super().__init__()
+        self._current = current
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="cmd-dialog"):
+            yield Static("Grammar Command", id="cmd-title")
+            items = []
+            for cmd in GRAMMAR_COMMANDS:
+                selected = " *" if cmd == self._current else ""
+                installed = shutil.which(cmd) is not None
+                status = "" if installed else " [dim](not installed)[/dim]"
+                items.append(ListItem(Label(f"  {cmd}{selected}{status}"), name=cmd))
+            yield ListView(*items, id="cmd-list")
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        self.dismiss(event.item.name)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+SILENCE_PRESETS = [0.3, 0.5, 0.7, 1.0, 1.5]
+
+
+class SilencePickerScreen(ModalScreen[float | None]):
+    """Modal for selecting silence threshold from presets."""
+
+    CSS = """
+    SilencePickerScreen {
+        align: center middle;
+    }
+
+    #silence-dialog {
+        width: 45;
+        height: auto;
+        border: thick $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #silence-title {
+        text-style: bold;
+        width: 100%;
+        content-align: center middle;
+        margin-bottom: 1;
+    }
+
+    #silence-list {
+        height: auto;
+        max-height: 10;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel", show=False),
+    ]
+
+    def __init__(self, current: float = 0.5) -> None:
+        super().__init__()
+        self._current = current
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="silence-dialog"):
+            yield Static("Silence Threshold (seconds)", id="silence-title")
+            items = []
+            for val in SILENCE_PRESETS:
+                marker = " *" if abs(val - self._current) < 0.01 else ""
+                items.append(ListItem(Label(f"  {val:.1f}s{marker}"), name=str(val)))
+            yield ListView(*items, id="silence-list")
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        self.dismiss(float(event.item.name))
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+# ── Menu Modal ────────────────────────────────────────────────────────
+
+
+class MenuScreen(ModalScreen[str | None]):
+    """Main menu modal with actions."""
+
+    CSS = """
+    MenuScreen {
+        align: center middle;
+    }
+
+    #menu-dialog {
+        width: 55;
+        height: auto;
+        max-height: 22;
+        border: thick $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #menu-title {
+        text-style: bold;
+        width: 100%;
+        content-align: center middle;
+        margin-bottom: 1;
+    }
+
+    #menu-list {
+        height: auto;
+        max-height: 18;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "close_menu", "Close", show=False),
+        Binding("m", "close_menu", "Close", show=False),
+        Binding("1", "pick_1", show=False),
+        Binding("2", "pick_2", show=False),
+        Binding("3", "pick_3", show=False),
+        Binding("4", "pick_4", show=False),
+        Binding("5", "pick_5", show=False),
+        Binding("6", "pick_6", show=False),
+        Binding("7", "pick_7", show=False),
+        Binding("8", "pick_8", show=False),
+        Binding("9", "pick_9", show=False),
+        Binding("i", "pick_3", "Interactive", show=False),
+        Binding("g", "pick_4", "Grammar", show=False),
+        Binding("x", "pick_5", "Delete", show=False),
+        Binding("q", "pick_9", "Quit", show=False),
+    ]
+
+    _ACTIONS = [
+        "select_model",
+        "delete_model",
+        "toggle_interactive",
+        "post_process",
+        "delete_selected",
+        "clear_history",
+        "set_grammar_command",
+        "set_silence_threshold",
+        "quit_app",
+    ]
+
+    def __init__(
+        self,
+        interactive: bool = False,
+        model_name: str = "",
+        grammar_command: str = "",
+        silence_seconds: float = 0.5,
+    ) -> None:
+        super().__init__()
+        self._interactive = interactive
+        self._model_name = model_name
+        self._grammar_command = grammar_command
+        self._silence_seconds = silence_seconds
+
+    def compose(self) -> ComposeResult:
+        interactive_state = "ON" if self._interactive else "OFF"
+        model_display = self._model_name or "none"
+        cmd_display = self._grammar_command or "claude"
+        with Vertical(id="menu-dialog"):
+            yield Static("Menu", id="menu-title")
+            yield ListView(
+                MenuItem("1", f"Select Model    \\[{model_display}]", "select_model"),
+                MenuItem("2", "Delete Model", "delete_model"),
+                MenuItem("3", f"Interactive     {interactive_state}", "toggle_interactive"),
+                MenuItem("4", "Grammar Fix", "post_process"),
+                MenuItem("5", "Delete History Entry", "delete_selected"),
+                MenuItem("6", "Clear History", "clear_history"),
+                MenuItem("7", f"Grammar Command \\[{cmd_display}]", "set_grammar_command"),
+                MenuItem("8", f"Silence Delay   \\[{self._silence_seconds:.1f}s]", "set_silence_threshold"),
+                MenuItem("9", "Quit", "quit_app"),
+                id="menu-list",
+            )
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        item = event.item
+        if isinstance(item, MenuItem):
+            self.dismiss(item.action_name)
+
+    def _pick(self, idx: int) -> None:
+        if idx < len(self._ACTIONS):
+            self.dismiss(self._ACTIONS[idx])
+
+    def action_pick_1(self) -> None:
+        self._pick(0)
+
+    def action_pick_2(self) -> None:
+        self._pick(1)
+
+    def action_pick_3(self) -> None:
+        self._pick(2)
+
+    def action_pick_4(self) -> None:
+        self._pick(3)
+
+    def action_pick_5(self) -> None:
+        self._pick(4)
+
+    def action_pick_6(self) -> None:
+        self._pick(5)
+
+    def action_pick_7(self) -> None:
+        self._pick(6)
+
+    def action_pick_8(self) -> None:
+        self._pick(7)
+
+    def action_pick_9(self) -> None:
+        self._pick(8)
+
+    def action_close_menu(self) -> None:
+        self.dismiss(None)
+
+
+# ── Model Picker Modal ───────────────────────────────────────────────
+
+
+class ModelPickerScreen(ModalScreen[ModelInfo | None]):
+    """Modal for selecting a model."""
+
+    CSS = """
+    ModelPickerScreen {
+        align: center middle;
+    }
+
+    #picker-dialog {
+        width: 60;
+        height: auto;
+        max-height: 20;
+        border: thick $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #picker-title {
+        text-style: bold;
+        width: 100%;
+        content-align: center middle;
+        margin-bottom: 1;
+    }
+
+    #picker-list {
+        height: auto;
+        max-height: 14;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "close_picker", "Close", show=False),
+    ]
+
+    def __init__(self, active_model: ModelInfo | None = None) -> None:
+        super().__init__()
+        self._active_model = active_model
+
+    def compose(self) -> ComposeResult:
+        items = []
+        for info in MODEL_REGISTRY:
+            selected = (
+                self._active_model is not None
+                and self._active_model.name == info.name
+            )
+            items.append(ModelPickerItem(info, selected=selected))
+        with Vertical(id="picker-dialog"):
+            yield Static("Select Model", id="picker-title")
+            yield ListView(*items, id="picker-list")
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        item = event.item
+        if isinstance(item, ModelPickerItem):
+            self.dismiss(item.info)
+
+    def action_close_picker(self) -> None:
+        self.dismiss(None)
+
+
 # ── Main App ────────────────────────────────────────────────────────────
 
 
@@ -312,28 +635,14 @@ class Voice2TextApp(App):
         height: 1fr;
     }
 
-    #left-panel {
-        width: 2fr;
-        height: 100%;
-        border: solid $accent;
-        padding: 1;
-    }
-
-    #right-panel {
-        width: 1fr;
-        height: 100%;
-        border: solid $accent;
-        padding: 1;
-    }
-
     #mic-label {
         height: 1;
         color: $text-muted;
+        margin-top: 1;
     }
 
     #level-bar {
         height: 1;
-        margin-bottom: 1;
     }
 
     #level-bar.recording {
@@ -341,26 +650,14 @@ class Voice2TextApp(App):
     }
 
     #transcript-area {
-        height: 1fr;
+        height: 2fr;
         border: round $primary;
         padding: 1;
         overflow-y: auto;
     }
 
-    #model-picker-label {
-        text-style: bold;
-        margin-bottom: 1;
-    }
-
-    #model-list {
-        height: auto;
-        max-height: 8;
-        border: round $secondary;
-    }
-
     #download-progress {
         height: auto;
-        margin-top: 1;
     }
 
     #download-progress ProgressBar {
@@ -381,11 +678,12 @@ class Voice2TextApp(App):
 
     BINDINGS = [
         Binding("space", "toggle_record", "Record", show=True),
-        Binding("i", "toggle_interactive", "Interactive Mode", show=True),
         Binding("p", "toggle_pause", "Pause", show=True),
-        Binding("g", "post_process", "Grammar Fix", show=True),
-        Binding("ctrl+z", "undo_correction", "Undo", show=False),
+        Binding("i", "toggle_interactive", "Interactive", show=True),
+        Binding("g", "post_process", "Grammar", show=True),
         Binding("x", "delete_selected", "Delete", show=True),
+        Binding("m", "open_menu", "Menu", show=True),
+        Binding("ctrl+z", "undo_correction", "Undo", show=False),
         Binding("q", "quit_app", "Quit", show=True),
     ]
 
@@ -402,7 +700,7 @@ class Voice2TextApp(App):
         self._level_task: asyncio.Task | None = None
         self._vad_task: asyncio.Task | None = None
         self._mic_name: str = ""
-        self._interactive: bool = False
+        self._interactive: bool = self._load_interactive_setting()
         self._vad = None  # VoiceActivityDetector instance during recording
         self._segment_texts: list[str] = []  # accumulated segment transcriptions
         self._segment_boundary: int = 0  # frame index of last segment end
@@ -422,44 +720,34 @@ class Voice2TextApp(App):
     def compose(self) -> ComposeResult:
         yield Header()
         yield Static("Starting...", id="status-bar")
-        with Horizontal(id="main-container"):
-            with Vertical(id="left-panel"):
-                yield Static("  Mic: detecting...", id="mic-label")
-                yield AudioLevelBar(id="level-bar")
-                yield Static(
-                    "Loading model, please wait...",
-                    id="transcript-area",
-                )
-            with Vertical(id="right-panel"):
-                yield Label("Model Picker", id="model-picker-label")
-                yield ListView(
-                    *self._build_model_items(),
-                    id="model-list",
-                )
-                yield DownloadProgress(id="download-progress")
-                yield Label("History", id="history-label")
-                yield ListView(id="history-list")
+        with Vertical(id="main-container"):
+            yield Static("  Mic: detecting...", id="mic-label")
+            yield AudioLevelBar(id="level-bar")
+            yield Static(
+                "Loading model, please wait...",
+                id="transcript-area",
+            )
+            yield DownloadProgress(id="download-progress")
+            yield Label("History  \\[x] delete", id="history-label")
+            yield ListView(id="history-list")
         yield Footer()
-
-    def _build_model_items(self) -> list[ModelPickerItem]:
-        active = self.model_manager.active_model
-        items = []
-        for info in MODEL_REGISTRY:
-            selected = active is not None and active.name == info.name
-            items.append(ModelPickerItem(info, selected=selected))
-        return items
 
     def on_mount(self) -> None:
         self.history = load_history()
         self._refresh_history()
         self.query_one("#download-progress", DownloadProgress).hide_progress()
         self._update_status("Detecting hardware...")
-        # Kick off background loading — UI is already fully rendered above
         self._detect_and_load()
 
     @work(thread=True)
     def _detect_and_load(self) -> None:
         """Detect GPU, mic, and load first available model."""
+        try:
+            self._detect_and_load_inner()
+        except Exception:
+            pass  # App may have been shut down during background load
+
+    def _detect_and_load_inner(self) -> None:
         # Step 1: detect backend (fast)
         backend = self.model_manager.detect_backend()
         self.call_from_thread(
@@ -494,19 +782,18 @@ class Voice2TextApp(App):
                     )
 
         def _no_models():
-            self._update_status(
-                f"Backend: {backend.upper()} | No models downloaded. Select one from the picker."
-            )
+            self._update_status("No models downloaded")
             self.query_one("#transcript-area", Static).update(
-                "No models downloaded.\nSelect a model from the picker on the right to download it."
+                "No models downloaded.\nOpening model picker..."
             )
+            self._open_model_picker()
 
         self.call_from_thread(_no_models)
 
     def _on_model_loaded(self) -> None:
         if self.model_manager.active_model:
             save_last_model(self.model_manager.active_model)
-        self._refresh_model_list()
+
         self.query_one("#transcript-area", Static).update(
             "Press SPACE to start recording..."
         )
@@ -514,12 +801,12 @@ class Voice2TextApp(App):
 
     def _update_status(self, text: str) -> None:
         """Update the top status bar with context info + message."""
-        info = self.model_manager.active_model
         backend = self.model_manager.backend.upper()
-        parts = []
-        parts.append(backend)
+        parts = [backend]
+        if self.model_manager.active_model:
+            parts.append(self.model_manager.active_model.name)
         if self._interactive:
-            parts.append("[bold blue]Interactive:[/bold blue] [bold]ON[/bold]")
+            parts.append("[bold blue]Interactive[/bold blue]")
         parts.append(text)
         self.query_one("#status-bar", Static).update(" | ".join(parts))
 
@@ -527,11 +814,110 @@ class Voice2TextApp(App):
         mic = self._mic_name or "detecting..."
         self.query_one("#mic-label", Static).update(f"  Mic: {mic}")
 
+    def action_open_menu(self) -> None:
+        """Open the main menu modal."""
+        if self.recorder.is_recording:
+            return
+
+        def on_menu_dismiss(action: str | None) -> None:
+            if action is None:
+                return
+            if action == "select_model":
+                self._open_model_picker()
+            elif action == "delete_model":
+                self._open_delete_model()
+            elif action == "toggle_interactive":
+                self.action_toggle_interactive()
+            elif action == "post_process":
+                self.action_post_process()
+            elif action == "delete_selected":
+                self.action_delete_selected()
+            elif action == "clear_history":
+                self._clear_history()
+            elif action == "set_grammar_command":
+                self._open_grammar_command_editor()
+            elif action == "set_silence_threshold":
+                self._open_silence_picker()
+            elif action == "quit_app":
+                self.action_quit_app()
+
+        from .postprocess import get_command
+
+        model_name = ""
+        if self.model_manager.active_model:
+            model_name = self.model_manager.active_model.name
+        self.push_screen(
+            MenuScreen(
+                interactive=self._interactive,
+                model_name=model_name,
+                grammar_command=get_command(),
+                silence_seconds=self._get_silence_seconds(),
+            ),
+            callback=on_menu_dismiss,
+        )
+
+    def _open_model_picker(self) -> None:
+        """Open the model picker modal."""
+
+        def on_picker_dismiss(info: ModelInfo | None) -> None:
+            if info is None:
+                return
+            if is_model_downloaded(info):
+                if (
+                    self.model_manager.active_model
+                    and self.model_manager.active_model.name == info.name
+                ):
+                    return
+                self._update_status(f"Switching to {info.name}...")
+                self._load_model_async(info)
+            else:
+                self._show_download_confirm(info)
+
+        self.push_screen(
+            ModelPickerScreen(active_model=self.model_manager.active_model),
+            callback=on_picker_dismiss,
+        )
+
+    def _open_delete_model(self) -> None:
+        """Open model picker to select a model to delete."""
+
+        def on_picker_dismiss(info: ModelInfo | None) -> None:
+            if info is None:
+                return
+            if not is_model_downloaded(info):
+                self._update_status(f"{info.name} is not downloaded")
+                return
+            size = get_model_size_on_disk(info)
+            preview = f"{info.name} ({size})"
+
+            def on_confirm(result: bool) -> None:
+                if not result:
+                    return
+                if (
+                    self.model_manager.active_model
+                    and self.model_manager.active_model.name == info.name
+                ):
+                    self.model_manager.unload()
+            
+                    self.query_one("#transcript-area", Static).update(
+                        "No model loaded.\nPress M to open menu and select a model."
+                    )
+                delete_model_files(info)
+                self._update_status(f"Deleted {info.name}")
+
+            self.push_screen(DeleteConfirmScreen(preview), callback=on_confirm)
+
+        self.push_screen(
+            ModelPickerScreen(active_model=self.model_manager.active_model),
+            callback=on_picker_dismiss,
+        )
+
     def action_toggle_interactive(self) -> None:
         """Toggle interactive (chunked transcription) mode."""
         if self.recorder.is_recording:
             return  # don't toggle mid-recording
         self._interactive = not self._interactive
+        self._save_config_value("interactive", "enabled", self._interactive)
         self._update_status("Ready")
 
     def action_toggle_pause(self) -> None:
@@ -548,21 +934,35 @@ class Voice2TextApp(App):
             bar.recording = False
 
     @staticmethod
-    def _get_silence_seconds() -> float:
-        """Read silence_seconds from config.toml, default 0.7."""
+    def _load_config() -> dict:
+        """Load config.toml if present."""
         config_file = Path(__file__).resolve().parent.parent / "config.toml"
         if not config_file.exists():
-            return 0.5
+            return {}
         try:
             try:
                 import tomllib
             except ModuleNotFoundError:
                 import tomli as tomllib  # type: ignore[no-redef]
             with open(config_file, "rb") as f:
-                config = tomllib.load(f)
+                return tomllib.load(f)
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _get_silence_seconds() -> float:
+        """Read silence_seconds from config.toml, default 0.5."""
+        config = Voice2TextApp._load_config()
+        try:
             return float(config.get("interactive", {}).get("silence_seconds", 0.5))
         except Exception:
             return 0.5
+
+    @staticmethod
+    def _load_interactive_setting() -> bool:
+        """Read interactive enabled state from config.toml, default False."""
+        config = Voice2TextApp._load_config()
+        return bool(config.get("interactive", {}).get("enabled", False))
 
     # ── Post-Processing via LLM CLI ──────────────────────────────────
 
@@ -642,78 +1042,144 @@ class Voice2TextApp(App):
         self.query_one("#transcript-area", Static).update(original)
         self._copy_async(original, "Correction undone")
 
-    def _refresh_model_list(self) -> None:
-        lv = self.query_one("#model-list", ListView)
-        lv.clear()
-        for item in self._build_model_items():
-            lv.append(item)
-
     def _refresh_history(self) -> None:
         lv = self.query_one("#history-list", ListView)
         lv.clear()
         for entry in self.history:
             lv.append(HistoryItem(entry))
 
-    # ── History Delete ────────────────────────────────────────────────────
-
-    def action_delete_selected(self) -> None:
-        """Delete whatever is currently highlighted — model or history entry."""
-        if self.recorder.is_recording:
+    def _clear_history(self) -> None:
+        """Delete all history entries after confirmation."""
+        if not self.history:
+            self._update_status("No history to clear")
             return
 
-        # Check model list
-        model_lv = self.query_one("#model-list", ListView)
-        if model_lv.has_focus and model_lv.highlighted_child is not None:
-            item = model_lv.highlighted_child
-            if not isinstance(item, ModelPickerItem):
+        def on_dismiss(result: bool) -> None:
+            if not result:
                 return
-            info = item.info
-            if not is_model_downloaded(info):
-                self._update_status(f"{info.name} is not downloaded")
-                return
-
-            size = get_model_size_on_disk(info)
-            preview = f"{info.name} ({size})"
-
-            def on_model_dismiss(result: bool) -> None:
-                if not result:
-                    return
-                if (
-                    self.model_manager.active_model
-                    and self.model_manager.active_model.name == info.name
-                ):
-                    self.model_manager.unload()
-                    self.query_one("#transcript-area", Static).update(
-                        "No model loaded.\nSelect a model from the picker to download it."
-                    )
-                delete_model_files(info)
-                self._refresh_model_list()
-                self._update_status(f"Deleted {info.name}")
-
-            self.push_screen(DeleteConfirmScreen(preview), callback=on_model_dismiss)
-            return
-
-        # Check history list
-        history_lv = self.query_one("#history-list", ListView)
-        if history_lv.has_focus and history_lv.highlighted_child is not None:
-            item = history_lv.highlighted_child
-            if not isinstance(item, HistoryItem):
-                return
-            entry = item.entry
-            preview = entry.preview[:60] if entry.preview else "(empty)"
-
-            def on_history_dismiss(result: bool) -> None:
-                if not result:
-                    return
+            for entry in self.history:
                 try:
                     entry.path.unlink()
                 except FileNotFoundError:
                     pass
-                self.history = [e for e in self.history if e.path != entry.path]
-                self._refresh_history()
-                self._update_status("Deleted transcript")
+            self.history.clear()
+            self._refresh_history()
+            self._update_status("History cleared")
 
-            self.push_screen(DeleteConfirmScreen(preview), callback=on_history_dismiss)
+        count = len(self.history)
+        self.push_screen(
+            DeleteConfirmScreen(f"Delete all {count} transcript(s)?"),
+            callback=on_dismiss,
+        )
+
+    # ── Settings ──────────────────────────────────────────────────────────
+
+    def _open_grammar_command_editor(self) -> None:
+        """Open picker to change the grammar CLI command."""
+        from .postprocess import get_command
+
+        def on_dismiss(value: str | None) -> None:
+            if value is None:
+                return
+            self._save_config_value("post_processing", "command", value)
+            self._update_status(f"Grammar command set to '{value}'")
+
+        self.push_screen(
+            CommandPickerScreen(get_command()),
+            callback=on_dismiss,
+        )
+
+    def _open_silence_picker(self) -> None:
+        """Open picker to change silence threshold."""
+
+        def on_dismiss(value: float | None) -> None:
+            if value is None:
+                return
+            self._save_config_value("interactive", "silence_seconds", value)
+            self._update_status(f"Silence delay set to {value:.1f}s")
+
+        self.push_screen(
+            SilencePickerScreen(self._get_silence_seconds()),
+            callback=on_dismiss,
+        )
+
+    @staticmethod
+    def _save_config_value(section: str, key: str, value: object) -> None:
+        """Write a single config value to config.toml, preserving existing content."""
+        config_file = Path(__file__).resolve().parent.parent / "config.toml"
+
+        config: dict = {}
+        if config_file.exists():
+            try:
+                try:
+                    import tomllib
+                except ModuleNotFoundError:
+                    import tomli as tomllib  # type: ignore[no-redef]
+                with open(config_file, "rb") as f:
+                    config = tomllib.load(f)
+            except Exception:
+                pass
+
+        if section not in config:
+            config[section] = {}
+        config[section][key] = value
+
+        # Write back as TOML (simple serializer — no third-party writer needed)
+        lines: list[str] = []
+        # Write top-level [[models]] arrays first if present
+        models = config.pop("models", None)
+        for sect, values in config.items():
+            if isinstance(values, dict):
+                lines.append(f"[{sect}]")
+                for k, v in values.items():
+                    if isinstance(v, bool):
+                        lines.append(f"{k} = {str(v).lower()}")
+                    elif isinstance(v, str):
+                        lines.append(f'{k} = "{v}"')
+                    elif isinstance(v, float):
+                        lines.append(f"{k} = {v}")
+                    elif isinstance(v, int):
+                        lines.append(f"{k} = {v}")
+                    else:
+                        lines.append(f'{k} = "{v}"')
+                lines.append("")
+        if models:
+            for model in models:
+                lines.append("[[models]]")
+                for k, v in model.items():
+                    lines.append(f'{k} = "{v}"')
+                lines.append("")
+
+        config_file.write_text("\n".join(lines) + "\n")
+
+    # ── History Delete ────────────────────────────────────────────────────
+
+    def action_delete_selected(self) -> None:
+        """Delete the highlighted history entry."""
+        if self.recorder.is_recording:
+            return
+
+        history_lv = self.query_one("#history-list", ListView)
+        if history_lv.highlighted_child is None:
+            return
+        item = history_lv.highlighted_child
+        if not isinstance(item, HistoryItem):
+            return
+        entry = item.entry
+        preview = entry.preview[:60] if entry.preview else "(empty)"
+
+        def on_dismiss(result: bool) -> None:
+            if not result:
+                return
+            try:
+                entry.path.unlink()
+            except FileNotFoundError:
+                pass
+            self.history = [e for e in self.history if e.path != entry.path]
+            self._refresh_history()
+            self._update_status("Deleted transcript")
+
+        self.push_screen(DeleteConfirmScreen(preview), callback=on_dismiss)
 
     # ── Recording ───────────────────────────────────────────────────────
 
@@ -930,21 +1396,6 @@ class Voice2TextApp(App):
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         item = event.item
-
-        # Model picker selection
-        if isinstance(item, ModelPickerItem):
-            info = item.info
-            if is_model_downloaded(info):
-                if (
-                    self.model_manager.active_model
-                    and self.model_manager.active_model.name == info.name
-                ):
-                    return  # already active
-                self._update_status(f"Switching to {info.name}...")
-                self._load_model_async(info)
-            else:
-                self._show_download_confirm(info)
-            return
 
         # History selection
         if isinstance(item, HistoryItem):

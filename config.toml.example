@@ -27,9 +27,12 @@
 # language = "en"
 
 # ── Interactive Mode ──────────────────────────────────────────────────
-# How long to wait for silence before triggering a transcription segment.
-# Lower = more responsive but may split mid-sentence. Default: 0.5
+# enabled: remember interactive mode on/off across sessions. Default: false
+# silence_seconds: how long to wait for silence before triggering a
+#   transcription segment. Lower = more responsive but may split
+#   mid-sentence. Default: 0.5
 # [interactive]
+# enabled = false
 # silence_seconds = 0.5
 
 # ── Post-Processing ──────────────────────────────────────────────────
