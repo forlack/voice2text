@@ -50,6 +50,16 @@ def is_command_available() -> bool:
     return shutil.which(get_command()) is not None
 
 
+def _build_command_args(exe: str, command: str, prompt: str) -> list[str]:
+    """Build the CLI argument list for each supported tool."""
+    if command == "codex":
+        return [exe, "exec", prompt]
+    if command == "gemini":
+        return [exe, "-p", prompt, "-e", "", "--allowed-tools", "", "-m", "gemini-2.5-flash"]
+    # Default (claude and others): use -p flag
+    return [exe, "-p", prompt]
+
+
 def correct(text: str) -> str:
     """Run the configured LLM CLI tool on text and return corrected output.
 
@@ -67,6 +77,9 @@ def correct(text: str) -> str:
 
     full_prompt = f"{prompt}\n\n{text}"
 
+    # Build command args per tool
+    cmd_args = _build_command_args(exe, command, full_prompt)
+
     kwargs: dict = {}
     if sys.platform == "win32":
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
@@ -74,7 +87,7 @@ def correct(text: str) -> str:
         kwargs["start_new_session"] = True
 
     result = subprocess.run(
-        [exe, "-p", full_prompt],
+        cmd_args,
         capture_output=True,
         text=True,
         timeout=30,
