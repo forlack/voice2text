@@ -4,12 +4,18 @@ version = "0.1.0"
 description = "TUI voice-to-text using NVIDIA Parakeet models"
 requires-python = ">=3.11"
 dependencies = [
-    "textual>=0.80.0",
-    "pyaudio>=0.2.14",
-    "onnx-asr>=0.10.0",
-    "onnxruntime>=1.17.0",
-    "huggingface-hub>=0.20.0",
+    "textual>=0.80.0,<9",
+    "pyaudio>=0.2.14,<1",
+    "onnx-asr>=0.10.0,<1",
+    "onnxruntime>=1.17.0,<2",
+    "huggingface-hub>=0.20.0,<2",
     "numpy",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=9.1.1,<10",
+    "pytest-asyncio>=1.4.0,<2",
 ]
 
 [project.scripts]

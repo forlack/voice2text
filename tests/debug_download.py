@@ -1,7 +1,9 @@
 """Diagnostic script for model download issues.
 
-Run directly:  python -m tests.test_download_debug
-Or via pytest:  pytest tests/test_download_debug.py -s
+Not a pytest test — downloads real files from HuggingFace (including a
+~640MB ONNX model), so it's kept out of pytest's `test_*` discovery.
+
+Run directly:  python -m tests.debug_download
 """
 
 import os
@@ -127,10 +129,4 @@ def run_all():
 
 
 if __name__ == "__main__":
-    run_all()
-
-
-# pytest entry point
-def test_download_debug():
-    """Run all download diagnostics (use pytest -s to see output)."""
     run_all()
