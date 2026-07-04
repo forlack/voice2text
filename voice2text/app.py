@@ -8,7 +8,7 @@ import shutil
 import time
 from pathlib import Path
 
-from textual import events, work
+from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -79,31 +79,49 @@ class ModelPickerItem(ListItem):
 class HistoryItem(ListItem):
     """A transcript history entry.
 
-    The label shows a width-truncated preview (ellipsized to fit the current
-    panel width); ``entry`` always holds the untruncated data for save/copy.
+    The label ellipsizes to fit the current panel width via Textual CSS
+    (``text-overflow: ellipsis``), which is applied at paint time against the
+    widget's real box width — correct on the very first frame and self-correcting
+    on any resize, with no ``self.size``/``on_resize`` state to go stale.
+
+    The label is built from the transcript's *full* first line (not the
+    80-char ``entry.preview`` cap), so on a wide terminal the text actually
+    reaches the panel's right edge and gets an ellipsis there instead of a
+    short, mid-word slice that leaves dead space. ``entry`` always holds the
+    untruncated data for save/copy.
+    """
+
+    # Read a generous slice of the transcript for the label: enough to fill
+    # the widest realistic terminal so CSS ellipsis always has something to
+    # trim, but bounded so we never pull a whole large transcript into a
+    # one-line label.
+    _MAX_DISPLAY_CHARS = 512
+
+    DEFAULT_CSS = """
+    HistoryItem Label {
+        width: 1fr;
+        text-wrap: nowrap;
+        text-overflow: ellipsis;
+    }
     """
 
     def __init__(self, entry: TranscriptEntry) -> None:
         self.entry = entry
-        self._preview = entry.preview.strip() if entry.preview else "(empty)"
-        super().__init__(Label(self._preview))
+        super().__init__(Label(f" - {self._display_text(entry)}"))
 
-    def on_mount(self) -> None:
-        self._retruncate()
+    @classmethod
+    def _display_text(cls, entry: TranscriptEntry) -> str:
+        """Full first line of the transcript, whitespace-collapsed to one line.
 
-    def on_resize(self, event: events.Resize) -> None:
-        self._retruncate()
-
-    def _retruncate(self) -> None:
-        prefix = " - "
-        width = self.size.width - len(prefix)
-        text = self._preview
-        if width > 0 and len(text) > width:
-            if width <= 1:
-                text = "…"
-            else:
-                text = text[: width - 1].rstrip() + "…"
-        self.query_one(Label).update(f"{prefix}{text}")
+        Falls back to ``entry.preview`` when the transcript file can't be read
+        (e.g. an in-memory entry with no backing file), so this never raises.
+        """
+        try:
+            raw = entry.full_text()[: cls._MAX_DISPLAY_CHARS]
+        except OSError:
+            raw = entry.preview or ""
+        collapsed = " ".join(raw.split())
+        return collapsed or "(empty)"
 
 
 class DownloadProgress(Vertical):
