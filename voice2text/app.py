@@ -936,18 +936,9 @@ class Voice2TextApp(App):
     @staticmethod
     def _load_config() -> dict:
         """Load config.toml if present."""
-        config_file = Path(__file__).resolve().parent.parent / "config.toml"
-        if not config_file.exists():
-            return {}
-        try:
-            try:
-                import tomllib
-            except ModuleNotFoundError:
-                import tomli as tomllib  # type: ignore[no-redef]
-            with open(config_file, "rb") as f:
-                return tomllib.load(f)
-        except Exception:
-            return {}
+        from .config import load_config
+
+        return load_config()
 
     @staticmethod
     def _get_silence_seconds() -> float:
@@ -1105,52 +1096,10 @@ class Voice2TextApp(App):
 
     @staticmethod
     def _save_config_value(section: str, key: str, value: object) -> None:
-        """Write a single config value to config.toml, preserving existing content."""
-        config_file = Path(__file__).resolve().parent.parent / "config.toml"
+        """Write a single config value to config.toml, preserving comments/formatting."""
+        from .config import save_config_value
 
-        config: dict = {}
-        if config_file.exists():
-            try:
-                try:
-                    import tomllib
-                except ModuleNotFoundError:
-                    import tomli as tomllib  # type: ignore[no-redef]
-                with open(config_file, "rb") as f:
-                    config = tomllib.load(f)
-            except Exception:
-                pass
-
-        if section not in config:
-            config[section] = {}
-        config[section][key] = value
-
-        # Write back as TOML (simple serializer — no third-party writer needed)
-        lines: list[str] = []
-        # Write top-level [[models]] arrays first if present
-        models = config.pop("models", None)
-        for sect, values in config.items():
-            if isinstance(values, dict):
-                lines.append(f"[{sect}]")
-                for k, v in values.items():
-                    if isinstance(v, bool):
-                        lines.append(f"{k} = {str(v).lower()}")
-                    elif isinstance(v, str):
-                        lines.append(f'{k} = "{v}"')
-                    elif isinstance(v, float):
-                        lines.append(f"{k} = {v}")
-                    elif isinstance(v, int):
-                        lines.append(f"{k} = {v}")
-                    else:
-                        lines.append(f'{k} = "{v}"')
-                lines.append("")
-        if models:
-            for model in models:
-                lines.append("[[models]]")
-                for k, v in model.items():
-                    lines.append(f'{k} = "{v}"')
-                lines.append("")
-
-        config_file.write_text("\n".join(lines) + "\n")
+        save_config_value(section, key, value)
 
     # ── History Delete ────────────────────────────────────────────────────
 

@@ -10,6 +10,7 @@ dependencies = [
     "onnxruntime>=1.17.0,<2",
     "huggingface-hub>=0.20.0,<2",
     "numpy",
+    "tomlkit>=0.12.0,<1",
 ]
 
 [project.optional-dependencies]

@@ -17,3 +17,7 @@ The README screenshot is a headless render of the real Textual TUI, not a mockup
 - `pytest`/`pytest-asyncio` are declared under the `test` extra in `pyproject.toml` — install with `pip install -e .[test]` before running `pytest tests/test_app.py`. They are not part of the base `dependencies` list.
 - `tests/debug_download.py` (not `test_*`, deliberately) is a manual diagnostic script that downloads real files from HuggingFace, including a ~640MB ONNX model. Run it directly with `python -m tests.debug_download`; it is intentionally excluded from pytest's default `test_*` discovery so plain `pytest` never triggers a network download.
 - `tests/test_app.py::test_post_process_no_text` is flaky/pre-existing-broken: it relies on a fixed `asyncio.sleep(3)` timing window and fails independent of unrelated changes.
+
+## config.toml reading/writing
+
+All reads and writes of `config.toml` go through `voice2text/config.py` (`load_config()` / `save_config_value()`), which uses `tomlkit` instead of `tomllib`/`tomli`. `tomlkit` round-trips comments and formatting, so a user who copies the heavily-commented `config.toml.example` and changes one setting via the in-app menu keeps their comments — a hand-rolled writer (previous implementation of `Voice2TextApp._save_config_value`) silently dropped them on every save. Don't reintroduce a local `tomllib`/`tomli` import in `app.py`/`models.py`/`postprocess.py`; route through `voice2text/config.py` instead.

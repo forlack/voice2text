@@ -6,11 +6,10 @@ import logging
 import shutil
 import subprocess
 import sys
-from pathlib import Path
+
+from .config import load_config
 
 log = logging.getLogger(__name__)
-
-_CONFIG_FILE = Path(__file__).resolve().parent.parent / "config.toml"
 
 _DEFAULT_COMMAND = "claude"
 _DEFAULT_PROMPT = (
@@ -21,18 +20,7 @@ _DEFAULT_PROMPT = (
 
 def _load_config() -> dict:
     """Load post-processing config from config.toml if present."""
-    if not _CONFIG_FILE.exists():
-        return {}
-    try:
-        try:
-            import tomllib
-        except ModuleNotFoundError:
-            import tomli as tomllib  # type: ignore[no-redef]
-        with open(_CONFIG_FILE, "rb") as f:
-            config = tomllib.load(f)
-    except Exception:
-        return {}
-    return config.get("post_processing", {})
+    return load_config().get("post_processing", {})
 
 
 def get_command() -> str:
