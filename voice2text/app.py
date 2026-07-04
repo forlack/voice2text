@@ -8,7 +8,7 @@ import shutil
 import time
 from pathlib import Path
 
-from textual import work
+from textual import events, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -76,12 +76,33 @@ class ModelPickerItem(ListItem):
 
 
 class HistoryItem(ListItem):
-    """A transcript history entry."""
+    """A transcript history entry.
+
+    The label shows a width-truncated preview (ellipsized to fit the current
+    panel width); ``entry`` always holds the untruncated data for save/copy.
+    """
 
     def __init__(self, entry: TranscriptEntry) -> None:
         self.entry = entry
-        preview = entry.preview[:70] if entry.preview else "(empty)"
-        super().__init__(Label(f" - {preview}"))
+        self._preview = entry.preview.strip() if entry.preview else "(empty)"
+        super().__init__(Label(self._preview))
+
+    def on_mount(self) -> None:
+        self._retruncate()
+
+    def on_resize(self, event: events.Resize) -> None:
+        self._retruncate()
+
+    def _retruncate(self) -> None:
+        prefix = " - "
+        width = self.size.width - len(prefix)
+        text = self._preview
+        if width > 0 and len(text) > width:
+            if width <= 1:
+                text = "…"
+            else:
+                text = text[: width - 1].rstrip() + "…"
+        self.query_one(Label).update(f"{prefix}{text}")
 
 
 class DownloadProgress(Vertical):
