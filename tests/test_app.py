@@ -277,48 +277,60 @@ async def test_audio_level_bar_renders():
 # ── Test: History List Truncation ───────────────────────────────────────
 
 
+def _render_line(widget) -> str:
+    """Render a widget's first strip as plain text, the way the terminal paints it.
+
+    Reading ``label.content``/``label.render()`` only returns the *unclipped*
+    source renderable - Textual applies ``text-overflow: ellipsis`` at paint
+    time against the widget's real box width, so truncation is only visible
+    by rendering an actual strip, not by inspecting the renderable.
+    """
+    strip = widget.render_line(0)
+    return "".join(segment.text for segment in strip)
+
+
 @pytest.mark.asyncio
-async def test_history_item_truncates_dynamically_to_width():
-    """Long history entries should ellipsize to fit the panel, and re-fit on resize."""
+@pytest.mark.parametrize("width", [50, 100, 155])
+async def test_history_item_truncates_to_real_panel_width(width):
+    """History entries should ellipsize to fit the actual History panel width.
+
+    Exercises the real ``Voice2TextApp`` widget tree (borders, containers,
+    ``ListView`` chrome and all) rather than a bespoke minimal app, since a
+    previous version of this test passed against a stripped-down layout while
+    the real app was visibly broken - it rendered stale/zero widths and hard
+    cut text mid-word with no ellipsis at all.
+    """
     from datetime import datetime
 
-    from textual.app import App, ComposeResult
-    from textual.widgets import Label, ListView
+    from textual.widgets import Label
 
     from voice2text.transcripts import TranscriptEntry
 
     long_text = (
         "So one of the issues is right now the hallway closet is recessed "
-        "so it does not line up with the rest of the wall and needs trim work"
+        "so it does not line up with the rest of the wall and needs trim work "
+        "and also the kitchen cabinets need to be repainted before we move the "
+        "fridge back in place"
     )
     entry = TranscriptEntry(path=Path("dummy.txt"), timestamp=datetime.now(), preview=long_text)
 
-    class TestApp(App):
-        CSS = "#history-list { width: 1fr; }"
+    app = Voice2TextApp()
+    with patch("voice2text.app.load_history", return_value=[entry]):
+        async with app.run_test(size=(width, 40)) as pilot:
+            # Deliberately check the very first settled frame, not after a
+            # manual resize - a fresh session never gets a user-driven resize
+            # event, so the initial layout pass must already be correct.
+            await pilot.pause()
 
-        def compose(self) -> ComposeResult:
-            yield ListView(HistoryItem(entry), id="history-list")
+            item = app.query_one(HistoryItem)
+            label = item.query_one(Label)
 
-    app = TestApp()
-    async with app.run_test(size=(40, 24)) as pilot:
-        await pilot.pause()
+            rendered = _render_line(label)
 
-        item = app.query_one(HistoryItem)
-        label = item.query_one(Label)
-        narrow_text = str(label.content)
-
-        # Rendered text is cut to fit the panel and ends with an ellipsis,
-        # but the underlying entry data is untouched (source of truth for copy/save).
-        assert narrow_text.endswith("…")
-        assert len(narrow_text) <= 40
-        assert item.entry.preview == long_text
-
-        # Resizing wider should re-truncate to show more text.
-        await pilot.resize_terminal(120, 24)
-        await pilot.pause()
-        wide_text = str(label.content)
-        assert len(wide_text) > len(narrow_text)
-        assert item.entry.preview == long_text
+            assert item.entry.preview == long_text
+            assert rendered.endswith("…")
+            # No dead space: the rendered line fills the label's own width.
+            assert len(rendered) == label.size.width
 
 
 # ── Test: Quit Binding ──────────────────────────────────────────────────

@@ -8,7 +8,7 @@ import shutil
 import time
 from pathlib import Path
 
-from textual import events, work
+from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -78,31 +78,25 @@ class ModelPickerItem(ListItem):
 class HistoryItem(ListItem):
     """A transcript history entry.
 
-    The label shows a width-truncated preview (ellipsized to fit the current
-    panel width); ``entry`` always holds the untruncated data for save/copy.
+    The label ellipsizes to fit the current panel width via CSS
+    (``text-overflow: ellipsis``), which Textual applies at paint time using
+    the real available width, so it's always correct on the very first frame
+    and needs no manual width tracking; ``entry`` always holds the
+    untruncated data for save/copy.
+    """
+
+    DEFAULT_CSS = """
+    HistoryItem Label {
+        width: 1fr;
+        text-wrap: nowrap;
+        text-overflow: ellipsis;
+    }
     """
 
     def __init__(self, entry: TranscriptEntry) -> None:
         self.entry = entry
-        self._preview = entry.preview.strip() if entry.preview else "(empty)"
-        super().__init__(Label(self._preview))
-
-    def on_mount(self) -> None:
-        self._retruncate()
-
-    def on_resize(self, event: events.Resize) -> None:
-        self._retruncate()
-
-    def _retruncate(self) -> None:
-        prefix = " - "
-        width = self.size.width - len(prefix)
-        text = self._preview
-        if width > 0 and len(text) > width:
-            if width <= 1:
-                text = "…"
-            else:
-                text = text[: width - 1].rstrip() + "…"
-        self.query_one(Label).update(f"{prefix}{text}")
+        preview = entry.preview.strip() if entry.preview else "(empty)"
+        super().__init__(Label(f" - {preview}"))
 
 
 class DownloadProgress(Vertical):
