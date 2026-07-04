@@ -274,6 +274,53 @@ async def test_audio_level_bar_renders():
         assert bar.level == 1.0
 
 
+# ── Test: History List Truncation ───────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_history_item_truncates_dynamically_to_width():
+    """Long history entries should ellipsize to fit the panel, and re-fit on resize."""
+    from datetime import datetime
+
+    from textual.app import App, ComposeResult
+    from textual.widgets import Label, ListView
+
+    from voice2text.transcripts import TranscriptEntry
+
+    long_text = (
+        "So one of the issues is right now the hallway closet is recessed "
+        "so it does not line up with the rest of the wall and needs trim work"
+    )
+    entry = TranscriptEntry(path=Path("dummy.txt"), timestamp=datetime.now(), preview=long_text)
+
+    class TestApp(App):
+        CSS = "#history-list { width: 1fr; }"
+
+        def compose(self) -> ComposeResult:
+            yield ListView(HistoryItem(entry), id="history-list")
+
+    app = TestApp()
+    async with app.run_test(size=(40, 24)) as pilot:
+        await pilot.pause()
+
+        item = app.query_one(HistoryItem)
+        label = item.query_one(Label)
+        narrow_text = str(label.content)
+
+        # Rendered text is cut to fit the panel and ends with an ellipsis,
+        # but the underlying entry data is untouched (source of truth for copy/save).
+        assert narrow_text.endswith("…")
+        assert len(narrow_text) <= 40
+        assert item.entry.preview == long_text
+
+        # Resizing wider should re-truncate to show more text.
+        await pilot.resize_terminal(120, 24)
+        await pilot.pause()
+        wide_text = str(label.content)
+        assert len(wide_text) > len(narrow_text)
+        assert item.entry.preview == long_text
+
+
 # ── Test: Quit Binding ──────────────────────────────────────────────────
 
 

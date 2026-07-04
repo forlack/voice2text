@@ -18,6 +18,10 @@ The README screenshot is a headless render of the real Textual TUI, not a mockup
 - `tests/debug_download.py` (not `test_*`, deliberately) is a manual diagnostic script that downloads real files from HuggingFace, including a ~640MB ONNX model. Run it directly with `python -m tests.debug_download`; it is intentionally excluded from pytest's default `test_*` discovery so plain `pytest` never triggers a network download.
 - `tests/test_app.py::test_post_process_no_text` is flaky/pre-existing-broken: it relies on a fixed `asyncio.sleep(3)` timing window and fails independent of unrelated changes.
 
+## History list width-based truncation
+
+`HistoryItem` in `app.py` truncates its displayed preview to the item's own `self.size.width` (via `on_resize`, which Textual fires per-widget when its container resizes — not just once at mount), appending "…" when the full preview doesn't fit. `entry.preview`/`entry.full_text()` (`transcripts.py`) are never touched by this — the label's rendered text is display-only, and copy/save operations always read from `entry`. Tests can drive width changes with `pilot.resize_terminal(width, height)` inside `run_test`, and must read a `Label`'s current text via `label.content` — this Textual version (8.2.8) has no `label.renderable`.
+
 ## config.toml reading/writing
 
 All reads and writes of `config.toml` go through `voice2text/config.py` (`load_config()` / `save_config_value()`), which uses `tomlkit` instead of `tomllib`/`tomli`. `tomlkit` round-trips comments and formatting, so a user who copies the heavily-commented `config.toml.example` and changes one setting via the in-app menu keeps their comments — a hand-rolled writer (previous implementation of `Voice2TextApp._save_config_value`) silently dropped them on every save. Don't reintroduce a local `tomllib`/`tomli` import in `app.py`/`models.py`/`postprocess.py`; route through `voice2text/config.py` instead.
