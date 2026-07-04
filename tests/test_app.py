@@ -335,6 +335,58 @@ async def test_quit_binding():
     # If we get here without timeout, quit worked
 
 
+# ── Test: Interactive Recording Finalization ────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_stop_recording_waits_for_pending_segment_worker(tmp_path):
+    """Pressing SPACE right after VAD fires the last segment must not drop it.
+
+    Reproduces the race where `_stop_recording` took the "no remaining audio"
+    branch and called `_finalize_interactive` before the in-flight
+    `_transcribe_segment` worker (dispatched by `_poll_vad` for the last
+    speech->silence transition) had appended its text to `_segment_texts`.
+    """
+    import time
+
+    app = Voice2TextApp()
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+
+        def slow_transcribe(wav_data):
+            time.sleep(0.3)
+            return "final utterance"
+
+        app.model_manager.transcribe = MagicMock(side_effect=slow_transcribe)
+        app.recorder = MagicMock()
+        app.recorder.frame_count = 0
+        app.recorder.stop.return_value = b""
+
+        app._interactive = True
+        app._vad = MagicMock()
+        app._vad_task = None
+        app._level_task = None
+        app._segment_texts = []
+        app._segment_boundary = 0
+
+        # Simulate _poll_vad detecting the final speech->silence transition
+        # and dispatching the segment's transcription worker just before the
+        # user presses SPACE.
+        app._segment_workers = [app._transcribe_segment(b"fake-wav")]
+
+        with patch("voice2text.transcripts.TRANSCRIPTS_DIR", tmp_path), patch(
+            "voice2text.app.copy_to_clipboard", return_value="Copied"
+        ):
+            await app._stop_recording()
+            await pilot.pause()
+
+        from textual.widgets import Static
+
+        transcript = str(app.query_one("#transcript-area", Static)._Static__content)
+        assert "final utterance" in transcript
+        assert app.history[0].full_text() == "final utterance"
+
+
 # ── Test: Clipboard Module ──────────────────────────────────────────────
 
 

@@ -14,6 +14,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
 from textual.screen import ModalScreen
+from textual.worker import Worker
 from textual.widgets import (
     Button,
     Footer,
@@ -725,6 +726,7 @@ class Voice2TextApp(App):
         self._vad = None  # VoiceActivityDetector instance during recording
         self._segment_texts: list[str] = []  # accumulated segment transcriptions
         self._segment_boundary: int = 0  # frame index of last segment end
+        self._segment_workers: list[Worker] = []  # in-flight _transcribe_segment workers
         self._pre_correction_text: str | None = None  # for undo
         self._pre_correction_entry: TranscriptEntry | None = None  # for undo
 
@@ -1153,9 +1155,9 @@ class Voice2TextApp(App):
 
     # ── Recording ───────────────────────────────────────────────────────
 
-    def action_toggle_record(self) -> None:
+    async def action_toggle_record(self) -> None:
         if self.recorder.is_recording:
-            self._stop_recording()
+            await self._stop_recording()
         else:
             self._start_recording()
 
@@ -1182,6 +1184,7 @@ class Voice2TextApp(App):
             self._vad = VoiceActivityDetector()
             self._segment_texts = []
             self._segment_boundary = 0
+            self._segment_workers = []
             self._vad_task = asyncio.ensure_future(self._poll_vad())
 
     async def _poll_level(self) -> None:
@@ -1247,7 +1250,7 @@ class Voice2TextApp(App):
                                 self._segment_boundary, seg_end
                             )
                             self._segment_boundary = seg_end
-                            self._transcribe_segment(wav_seg)
+                            self._segment_workers.append(self._transcribe_segment(wav_seg))
                         was_speech = False
                         silence_chunks = 0
 
@@ -1303,7 +1306,7 @@ class Voice2TextApp(App):
         clip_msg = copy_to_clipboard(text)
         self.call_from_thread(self._update_status, f"{clip_msg} | {suffix}")
 
-    def _stop_recording(self) -> None:
+    async def _stop_recording(self) -> None:
         is_interactive = self._interactive and self._vad is not None
 
         # Cancel VAD polling before stopping recorder
@@ -1334,6 +1337,12 @@ class Voice2TextApp(App):
             if remaining_wav:
                 self._transcribe_final_segment(remaining_wav)
             else:
+                # Wait for any segment transcriptions still in flight from VAD
+                # (fired via @work(thread=True), no ordering guarantee) so
+                # _finalize_interactive doesn't save/copy truncated text.
+                if self._segment_workers:
+                    await self.workers.wait_for_complete(self._segment_workers)
+                    self._segment_workers = []
                 self._finalize_interactive()
         else:
             self.query_one("#transcript-area", Static).update("Transcribing...")
