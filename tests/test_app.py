@@ -413,6 +413,30 @@ def test_hf_xet_and_progress_bars_disabled():
 # ── Test: Post-Processing Module ─────────────────────────────────────
 
 
+def test_save_config_value_preserves_comments(tmp_path):
+    """Saving a setting via the menu must not clobber existing comments/formatting."""
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        "# top-level comment\n"
+        "[post_processing]\n"
+        "# command used for grammar correction\n"
+        'command = "claude"\n'
+        "\n"
+        "[interactive]\n"
+        "enabled = true\n"
+    )
+
+    with patch("voice2text.config.CONFIG_FILE", config_file):
+        Voice2TextApp._save_config_value("interactive", "silence_seconds", 1.5)
+
+    contents = config_file.read_text()
+    assert "# top-level comment" in contents
+    assert "# command used for grammar correction" in contents
+    assert 'command = "claude"' in contents
+    assert "enabled = true" in contents
+    assert "silence_seconds = 1.5" in contents
+
+
 def test_postprocess_config_defaults():
     """Post-process should have sensible defaults."""
     from voice2text.postprocess import get_command, get_prompt

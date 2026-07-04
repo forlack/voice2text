@@ -30,7 +30,6 @@ ort.set_default_logger_severity(3)
 
 MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
 _LAST_MODEL_FILE = MODELS_DIR / ".last_model"
-_CONFIG_FILE = Path(__file__).resolve().parent.parent / "config.toml"
 
 
 @dataclass
@@ -71,17 +70,9 @@ _BUILTIN_MODELS: list[ModelInfo] = [
 
 def _load_custom_models() -> list[ModelInfo]:
     """Load custom models from config.toml if it exists."""
-    if not _CONFIG_FILE.exists():
-        return []
-    try:
-        import tomllib
-    except ModuleNotFoundError:
-        import tomli as tomllib  # type: ignore[no-redef]
-    try:
-        with open(_CONFIG_FILE, "rb") as f:
-            config = tomllib.load(f)
-    except Exception:
-        return []
+    from .config import load_config
+
+    config = load_config()
     custom = []
     for m in config.get("models", []):
         try:
