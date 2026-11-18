@@ -103,8 +103,9 @@ async def test_menu_opens_and_closes():
 
 
 @pytest.mark.asyncio
-async def test_model_picker_modal_shows_all_models():
-    """Model picker modal should list all models from the registry."""
+async def test_model_picker_modal_shows_available_models():
+    """Model picker lists curated, custom, and installed legacy models."""
+    from voice2text.models import picker_models
     from textual.app import App, ComposeResult
     from textual.widgets import Static
 
@@ -121,9 +122,9 @@ async def test_model_picker_modal_shows_all_models():
         await asyncio.sleep(0.2)
 
         items = list(app.screen.query(ModelPickerItem))
-        assert len(items) == len(MODEL_REGISTRY)
+        assert len(items) == len(picker_models())
         model_names = {item.info.name for item in items}
-        expected_names = {info.name for info in MODEL_REGISTRY}
+        expected_names = {info.name for info in picker_models()}
         assert model_names == expected_names
 
         await pilot.press("escape")

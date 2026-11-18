@@ -14,20 +14,24 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
 from textual.screen import ModalScreen
-from textual.worker import Worker
+from textual.worker import Worker, get_current_worker
 from textual.widgets import (
     Button,
     Footer,
     Header,
+    Input,
     Label,
     ListItem,
     ListView,
     ProgressBar,
+    Select,
     Static,
 )
 
 from .clipboard import copy_to_clipboard
+from .model_browser import ModelSearchScreen
 from .models import MODEL_REGISTRY, ModelInfo, ModelManager, delete_model_files, get_model_size_on_disk, is_model_downloaded, load_last_model, save_last_model
+from .models import IMPORT_MODEL_TYPES, inspect_huggingface_model, register_custom_model, picker_models
 from .recorder import Recorder
 from .transcripts import TranscriptEntry, load_history, save_transcript
 
@@ -64,6 +68,11 @@ class AudioLevelBar(Static):
 class ModelPickerItem(ListItem):
     """A model entry in the picker list."""
 
+    DEFAULT_CSS = """
+    ModelPickerItem { height: 2; }
+    ModelPickerItem Label { width: 1fr; text-wrap: nowrap; text-overflow: ellipsis; }
+    """
+
     def __init__(self, info: ModelInfo, selected: bool = False) -> None:
         self.info = info
         downloaded = is_model_downloaded(info)
@@ -73,7 +82,7 @@ class ModelPickerItem(ListItem):
             status = f" ({size})"
         else:
             status = " ⬇ not downloaded"
-        super().__init__(Label(f" {icon} {info.name}{status}"))
+        super().__init__(Label(f" {icon} {info.name}{status}\n   {info.description}", markup=False))
 
 
 class HistoryItem(ListItem):
@@ -593,6 +602,80 @@ class MenuScreen(ModalScreen[str | None]):
 # ── Model Picker Modal ───────────────────────────────────────────────
 
 
+class AddModelScreen(ModalScreen[ModelInfo | None]):
+    """Inspect a Hugging Face ONNX repository before offering its download."""
+
+    CSS = """
+    AddModelScreen { align: center middle; }
+    #add-model-dialog {
+        width: 72; height: auto; max-height: 95%; overflow-y: auto;
+        border: thick $accent; background: $surface; padding: 1 2;
+    }
+    #add-model-dialog Input, #add-model-dialog Select { margin-bottom: 1; }
+    #add-model-status { height: auto; margin: 1 0; }
+    #add-model-buttons { height: auto; }
+    #add-model-buttons Button { margin-right: 1; }
+    """
+    BINDINGS = [Binding("escape", "cancel", "Cancel", show=False)]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="add-model-dialog"):
+            yield Static("Add model from Hugging Face")
+            yield Static("Use a Parakeet or Canary INT8 ONNX export for onnx-asr.")
+            yield Input(placeholder="https://huggingface.co/owner/model", id="model-link")
+            yield Select(
+                [("Detect from config.json", "auto"), *[(label, key) for key, (label, _) in IMPORT_MODEL_TYPES.items()]],
+                value="auto", allow_blank=False, id="model-type",
+            )
+            yield Input(placeholder="Canary language (default: en); leave blank for Parakeet", id="model-language")
+            yield Static("Checks metadata first. You can review the size before downloading.", id="add-model-status", markup=False)
+            with Horizontal(id="add-model-buttons"):
+                yield Button("Check & add model", id="check-model", variant="primary")
+                yield Button("Cancel", id="cancel-add-model")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        if event.button.id == "cancel-add-model":
+            self.action_cancel()
+        elif event.button.id == "check-model":
+            self.query_one("#check-model", Button).disabled = True
+            self.query_one("#add-model-status", Static).update("Checking repository compatibility...")
+            self._inspect(
+                self.query_one("#model-link", Input).value,
+                str(self.query_one("#model-type", Select).value),
+                self.query_one("#model-language", Input).value,
+            )
+
+    @work(thread=True)
+    def _inspect(self, link: str, model_type: str, language: str) -> None:
+        app = self.app
+        try:
+            info = inspect_huggingface_model(link, model_type, language)
+        except Exception as exc:
+            if not get_current_worker().is_cancelled:
+                app.call_from_thread(self._inspection_finished, None, str(exc))
+        else:
+            if not get_current_worker().is_cancelled:
+                app.call_from_thread(self._inspection_finished, info, "")
+
+    def _inspection_finished(self, info: ModelInfo | None, error: str) -> None:
+        if not self.is_mounted:
+            return
+        if info is not None:
+            try:
+                info = register_custom_model(info)
+            except Exception as exc:
+                error = str(exc)
+            else:
+                self.dismiss(info)
+                return
+        self.query_one("#add-model-status", Static).update(error)
+        self.query_one("#check-model", Button).disabled = False
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class ModelPickerScreen(ModalScreen[ModelInfo | None]):
     """Modal for selecting a model."""
 
@@ -619,21 +702,24 @@ class ModelPickerScreen(ModalScreen[ModelInfo | None]):
 
     #picker-list {
         height: auto;
-        max-height: 14;
+        max-height: 10;
     }
+    #picker-actions { height: auto; }
+    #picker-actions Button { margin-right: 1; }
     """
 
     BINDINGS = [
         Binding("escape", "close_picker", "Close", show=False),
     ]
 
-    def __init__(self, active_model: ModelInfo | None = None) -> None:
+    def __init__(self, active_model: ModelInfo | None = None, allow_add: bool = True) -> None:
         super().__init__()
         self._active_model = active_model
+        self._allow_add = allow_add
 
     def compose(self) -> ComposeResult:
         items = []
-        for info in MODEL_REGISTRY:
+        for info in picker_models():
             selected = (
                 self._active_model is not None
                 and self._active_model.name == info.name
@@ -642,6 +728,21 @@ class ModelPickerScreen(ModalScreen[ModelInfo | None]):
         with Vertical(id="picker-dialog"):
             yield Static("Select Model", id="picker-title")
             yield ListView(*items, id="picker-list")
+            if self._allow_add:
+                with Horizontal(id="picker-actions"):
+                    yield Button("Search Hugging Face", id="search-models", variant="primary")
+                    yield Button("Paste model link", id="add-model")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id in ("add-model", "search-models"):
+            event.stop()
+
+            def on_added(info: ModelInfo | None) -> None:
+                if info is not None:
+                    self.dismiss(info)
+
+            screen = ModelSearchScreen() if event.button.id == "search-models" else AddModelScreen()
+            self.app.push_screen(screen, callback=on_added)
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         item = event.item
@@ -949,7 +1050,7 @@ class Voice2TextApp(App):
             self.push_screen(DeleteConfirmScreen(preview), callback=on_confirm)
 
         self.push_screen(
-            ModelPickerScreen(active_model=self.model_manager.active_model),
+            ModelPickerScreen(active_model=self.model_manager.active_model, allow_add=False),
             callback=on_picker_dismiss,
         )
 

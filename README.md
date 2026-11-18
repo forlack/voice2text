@@ -9,7 +9,7 @@ A terminal-based voice-to-text application with real-time transcription and gram
 - **100% Local & Offline** — All speech recognition runs on your machine. No audio leaves your computer, no cloud APIs, no accounts required. Models are open-source weights ([CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/) / [MIT](https://opensource.org/licenses/MIT)) downloaded once from HuggingFace, then used entirely offline
 - **Record & Transcribe** — Press SPACE to record from your microphone, SPACE again to stop and transcribe
 - **Interactive Mode** — Press `i` to toggle real-time chunked transcription. Uses Silero VAD to detect speech/silence boundaries and transcribes segments as you speak, showing results incrementally
-- **Multiple Models** — Ships with 3 built-in models, add more via `config.toml`
+- **Multiple Models** — Three curated defaults: Parakeet Ultra, Parakeet v2, and Canary Flash. Fuzzy-search compatible Hugging Face exports by popularity, paste a model link, or use `config.toml`
 - **Model Management** — Download, switch, and delete models from the TUI. INT8 quantized ONNX models for fast CPU inference with optional CUDA acceleration
 - **Grammar Correction** — Press `g` to post-process transcriptions with an external LLM CLI tool (default: `claude`). Fixes grammar, punctuation, and capitalization. Configurable command and prompt via `config.toml`. `ctrl+z` to undo
 - **Clipboard Integration** — Transcriptions are automatically copied to your clipboard
@@ -110,15 +110,36 @@ prompt = "Fix grammar, punctuation, and capitalization in this voice transcripti
 
 | Model | Languages | INT8 Size | Notes |
 |---|---|---|---|
-| **parakeet-tdt-0.6b-v2** | English | ~640 MB | Best English accuracy |
-| **parakeet-tdt-0.6b-v3** | 25 languages | ~640 MB | Multilingual |
+| **parakeet-ultra** | 25 languages | ~668 MB | Recommended starting point; Moondream's post-trained v3, Olicorne ONNX export |
+| **parakeet-tdt-0.6b-v2** | English | ~640 MB | English baseline for comparison |
 | **canary-180m-flash** | EN/DE/FR/ES | ~214 MB | Smallest, includes translation |
 
-All models are INT8 quantized ONNX from [istupakov's HuggingFace collection](https://huggingface.co/istupakov).
+All models use INT8 ONNX exports from [istupakov](https://huggingface.co/istupakov) or, for Ultra, [Olicorne](https://huggingface.co/Olicorne/parakeet-tdt-0.6b-v3-ultra-onnx). Ultra is derived from [moondream/parakeet-ultra](https://huggingface.co/moondream/parakeet-ultra); this app uses the ONNX export to run locally on CPU or CUDA.
+
+ONNX Runtime 1.22+ is required for Ultra's 8-bit `MatMulNBits` encoder ([Runtime implementation](https://github.com/microsoft/onnxruntime/blob/v1.22.0/onnxruntime/contrib_ops/cpu/quantization/matmul_nbits.cc)).
+
+Existing Parakeet v3 installations and last-used preferences remain supported. New installations can find v3 through search. The last-used model still takes priority at startup.
+
+## Finding Models
+
+Open **Menu → Select Model → Search Hugging Face**. Type to fuzzy-filter names, owners, model families, or language codes (for example `prkt ult` or `canary en`). Results retain their download-count order. Use **↑/↓** or **Ctrl-P/Ctrl-N** while typing, then **Enter** to add a model and review its download. **Esc** closes search; **Refresh** fetches a new catalog.
+
+Search checks up to 100 popular `onnx-asr`-tagged repositories and 100 popular ONNX speech-recognition repositories, deduplicates them, and only shows exports that pass the importer's config and file-layout checks. It downloads small configs, never model weights, while browsing. Results are cached in memory for five minutes. Unavailable repositories are skipped with a count; refresh retries them. This is a bounded catalog, not an exhaustive search of Hugging Face; use **Paste model link** for repositories outside it.
+
+Rows show download counts, size, model family, and publisher-listed languages. Popularity is not an accuracy ranking, and passing layout checks does not guarantee a valid ONNX graph. Start with Ultra, then compare models using the same recordings: check names, punctuation, background noise, and transcription time on your machine. Models trained for a particular language or domain may suit that use better; check their model cards before choosing.
 
 ## Custom Models
 
-Add models via `config.toml` in the project root. Copy `config.toml.example` to get started:
+Open **Menu → Select Model → Paste model link**, paste a repository URL (or `owner/model`), and choose automatic detection or a model type. The app checks `config.json`, the vocabulary, and the required INT8 ONNX filenames before adding the model. It then shows the usual download confirmation with the size. Canceling the download leaves the model in the picker for later.
+
+Link import supports **Parakeet TDT, RNNT, CTC, and Canary** exports in the onnx-asr format, with files at the repository root or in `int8/`. Canary accepts a language code (default `en`); Parakeet detects language automatically. Examples:
+
+- `https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx`
+- `https://huggingface.co/Olicorne/parakeet-tdt-0.6b-v3-ultra-onnx`
+
+The original Ultra safetensors repository, arbitrary `.onnx` files, GGUF, CoreML, and MLX exports cannot be imported through this flow. Metadata validation checks the export layout; successful loading still depends on valid ONNX graphs and a compatible ONNX Runtime. No repository Python code is executed. Imported models are saved in `config.toml` and appear immediately without restarting.
+
+You can also add models via `config.toml` in the project root. Copy `config.toml.example` to get started:
 
 ```bash
 cp config.toml.example config.toml

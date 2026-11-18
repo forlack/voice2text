@@ -1,5 +1,7 @@
 # Voice2Text Configuration
 # Copy this file to config.toml to add custom models.
+# Or use Menu > Select Model > Search Hugging Face / Paste model link for compatible
+# Parakeet/Canary INT8 ONNX exports (checks metadata before downloading).
 #
 # Each [[models]] entry adds a model to the picker.
 # Required fields: name, onnx_asr_name

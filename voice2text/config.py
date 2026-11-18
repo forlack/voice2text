@@ -28,3 +28,16 @@ def save_config_value(section: str, key: str, value: object) -> None:
     config[section][key] = value
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         tomlkit.dump(config, f)
+
+
+def save_custom_model(values: dict) -> None:
+    """Append a model table without losing the user's configuration comments."""
+    config = load_config()
+    if "models" not in config:
+        config["models"] = tomlkit.aot()
+    entry = tomlkit.table()
+    for key, value in values.items():
+        entry[key] = value
+    config["models"].append(entry)
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        tomlkit.dump(config, f)
